@@ -1,0 +1,30 @@
+import { z } from "zod";
+
+export const smtpSchema = z.object({
+  host: z.string().min(1, "Hôte SMTP requis"),
+  port: z.coerce.number().int().min(1).max(65535),
+  user: z.string().email("Email SMTP invalide"),
+  password: z.string().min(1, "Mot de passe requis"),
+  from_name: z.string().min(1, "Nom d'expéditeur requis"),
+  from_email: z.string().email("Email expéditeur invalide"),
+  secure: z.coerce.boolean().default(false),
+});
+
+export const mistralSchema = z.object({
+  api_key: z.string().min(10, "Clé API invalide"),
+  model: z.string().default("mistral-small-latest"),
+});
+
+export const unipileSchema = z.object({
+  api_key: z.string().min(10, "Clé API Unipile invalide"),
+  account_id: z.string().optional(),
+});
+
+export const dropcontactSchema = z.object({
+  api_key: z.string().min(10, "Clé API Dropcontact invalide"),
+});
+
+export type SmtpConfig = z.infer<typeof smtpSchema>;
+export type MistralConfig = z.infer<typeof mistralSchema>;
+export type UnipileConfig = z.infer<typeof unipileSchema>;
+export type DropcontactConfig = z.infer<typeof dropcontactSchema>;
