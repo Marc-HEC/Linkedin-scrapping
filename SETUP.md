@@ -6,6 +6,8 @@
 2. Dans **SQL Editor**, exécute les migrations dans l'ordre :
    - `supabase/migrations/0001_init_schema.sql`
    - `supabase/migrations/0002_rls_policies.sql`
+   - `supabase/migrations/0003_auth_trigger.sql`
+   - `supabase/migrations/0004_tags_and_matching.sql`
 3. Dans **Project Settings → API**, copie :
    - `URL` → `NEXT_PUBLIC_SUPABASE_URL`
    - `anon public` → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
@@ -76,11 +78,41 @@ APP_MASTER_KEY (env var)
 - **Déchiffrement** uniquement dans les Server Actions côté serveur, juste avant utilisation
 - **RLS Supabase** : chaque utilisateur ne peut lire/modifier que ses propres données
 
-## 6. Prochaines étapes (Milestones suivants)
+## 6. Flux d'utilisation (M3 — Campagnes par tags)
 
-- [ ] M3 : Import CSV contacts (wizard dropzone → mapping → validation)
-- [ ] M4 : Éditeur de templates Tiptap avec variables `[Prénom]`
-- [ ] M5 : Moteur de personnalisation + génération IA (Mistral)
-- [ ] M6 : Campagne email avec throttling SMTP + suppression list
-- [ ] M7 : Liste LinkedIn copy-paste avec état "envoyé" persistant
-- [ ] M8 : Dashboard analytics (KPI, taux d'ouverture, bounces)
+1. **Contacts** (`/contacts`) : ajoute des contacts à la main ou importe un CSV.
+   Colonnes reconnues : `prenom, nom, email, entreprise, role, linkedin, tags`
+   (les tags sont séparés par `;` ou `|` dans la colonne CSV).
+2. **Templates** (`/templates`) : crée un template avec des variables entre crochets :
+   `[Prénom]`, `[NomEntreprise]`, `[Rôle]`, `[Secteur]`, etc.
+   Alias FR automatiques (`Prénom`/`Prenom`/`prenom` → `first_name`, etc.).
+   Choisis le canal : **Email**, **Invitation LinkedIn** (note 300 car.), **Message LinkedIn**.
+3. **Campagnes** (`/campaigns/new`) :
+   - choisis le template,
+   - ajoute les **tags de ciblage par ordre de priorité** (le 1er pèse le plus),
+   - l'aperçu à droite montre le nombre de contacts matchés, le top 5, et
+     le rendu du message pour chaque contact (variables substituées),
+   - règle le quota journalier et le délai entre envois,
+   - **Lancer** → messages envoyés automatiquement :
+     - email via ton SMTP configuré,
+     - LinkedIn via l'API Unipile (partenaire officiel).
+
+## 7. Intégration LinkedIn via Unipile
+
+Unipile est une API tierce officielle qui permet l'envoi programmatique de messages
+et invitations LinkedIn sans enfreindre les CGU. Dans **Intégrations** → **LinkedIn —
+Unipile**, fournis :
+
+- `api_key` : clé Unipile (`upli_...`)
+- `dsn` : le host:port fourni par Unipile (ex: `api8.unipile.com:13851`)
+- `account_id` : l'ID de ton compte LinkedIn connecté dans Unipile
+
+## 8. Prochaines étapes
+
+- [ ] Raffinement IA Mistral avant envoi (ton formel/casual)
+- [ ] Suivi des réponses LinkedIn (webhook Unipile `message_received`)
+- [ ] Enrichissement Dropcontact à l'import (trouve l'email pro)
+- [ ] Dashboard analytics (taux d'ouverture, réponses, bounces)
+- [ ] Gestion de la liste de suppression (désinscription RGPD)
+
+

@@ -17,7 +17,8 @@ export const mistralSchema = z.object({
 
 export const unipileSchema = z.object({
   api_key: z.string().min(10, "Clé API Unipile invalide"),
-  account_id: z.string().optional(),
+  dsn: z.string().min(5, "DSN Unipile requis (ex: api8.unipile.com:13851)"),
+  account_id: z.string().min(1, "Account ID Unipile requis"),
 });
 
 export const dropcontactSchema = z.object({

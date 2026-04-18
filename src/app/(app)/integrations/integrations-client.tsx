@@ -67,8 +67,8 @@ export function IntegrationsClient({ integrations }: Props) {
         title="LinkedIn — Unipile"
         description={
           <>
-            Optionnel : connecte ton compte LinkedIn via l&apos;API Unipile pour synchroniser les réponses.
-            L&apos;envoi reste manuel (conforme aux CGU LinkedIn).
+            Envoi automatique d&apos;invitations et messages LinkedIn via l&apos;API Unipile
+            (partenaire officiel, conforme aux CGU LinkedIn).
           </>
         }
         isConnected={!!(unipile?.is_active)}
@@ -76,7 +76,8 @@ export function IntegrationsClient({ integrations }: Props) {
         updatedAt={unipile?.updated_at}
         fields={[
           { name: "api_key", label: "Clé API Unipile", type: "password", placeholder: "upli_...", required: true },
-          { name: "account_id", label: "Account ID (optionnel)", placeholder: "acc_..." },
+          { name: "dsn", label: "DSN Unipile", placeholder: "api8.unipile.com:13851", required: true },
+          { name: "account_id", label: "Account ID LinkedIn (Unipile)", placeholder: "acc_...", required: true },
         ]}
         onSave={async (fd) => { const r = await saveUnipileAction(fd); refresh(); return r; }}
         onDisconnect={async () => { await deleteIntegrationAction("unipile"); refresh(); }}
