@@ -198,6 +198,18 @@ export async function getIntegrationsStatusAction() {
   return data ?? [];
 }
 
+// ---- Utilitaire : vérifie si le user a une intégration LinkedIn active (OutX ou Unipile) ----
+export async function hasActiveLinkedinIntegration(userId: string): Promise<boolean> {
+  const admin = createSupabaseAdmin();
+  const { data } = await admin
+    .from("user_integrations")
+    .select("provider")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .in("provider", ["outx", "unipile"]);
+  return (data ?? []).length > 0;
+}
+
 // ---- Utilitaire interne : récupère credentials déchiffrés (server-only) ----
 export async function getDecryptedCredential<T>(userId: string, provider: Provider): Promise<T | null> {
   const admin = createSupabaseAdmin();

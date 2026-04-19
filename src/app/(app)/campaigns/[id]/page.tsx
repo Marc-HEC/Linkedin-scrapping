@@ -27,13 +27,6 @@ export default async function CampaignDetailPage({
     .single();
   if (!campaign) notFound();
 
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("linkedin_mode")
-    .eq("id", user.id)
-    .single();
-  const linkedinMode = (profile?.linkedin_mode ?? "manual") as "manual" | "unipile";
-
   const { data: messages } = await admin
     .from("messages_generated")
     .select("id, contact_id, subject, body_rendered, status, sent_at, error_message")
@@ -52,9 +45,6 @@ export default async function CampaignDetailPage({
   const contactsMap = new Map(
     (contacts ?? []).map((c) => [c.id, c])
   );
-
-  const isLinkedIn = campaign.channel === "linkedin_connect" || campaign.channel === "linkedin_message";
-  const isManualMode = isLinkedIn && linkedinMode === "manual";
 
   const statusCounts = msgs.reduce<Record<string, number>>((acc, m) => {
     acc[m.status] = (acc[m.status] ?? 0) + 1;
@@ -105,7 +95,6 @@ export default async function CampaignDetailPage({
         campaignId={campaign.id}
         campaignStatus={campaign.status}
         rows={rows}
-        manualMode={isManualMode}
         channel={campaign.channel}
       />
     </div>

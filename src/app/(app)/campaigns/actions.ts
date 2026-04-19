@@ -82,14 +82,17 @@ export async function launchCampaignAction(input: LaunchInput) {
     .single();
   if (!tpl) return { error: "Template introuvable." };
 
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("linkedin_mode")
-    .eq("id", userId)
-    .single();
-  const linkedinMode = (profile?.linkedin_mode ?? "manual") as "manual" | "unipile";
   const isLinkedIn = tpl.channel === "linkedin_connect" || tpl.channel === "linkedin_message";
-  const isManualLinkedIn = isLinkedIn && linkedinMode === "manual";
+
+  // Validation anticipée : si campagne LinkedIn, on vérifie que l'intégration existe
+  // AVANT de créer la campagne. Échec immédiat avec message clair sinon.
+  if (isLinkedIn) {
+    try {
+      await getLinkedinSenderForUser(userId);
+    } catch {
+      return { error: "Aucune intégration LinkedIn configurée. Va dans Intégrations pour configurer OutX ou Unipile." };
+    }
+  }
 
   const contacts = await previewMatchesAction(input.tagsPriority, input.dailyQuota);
   if (contacts.length === 0) return { error: "Aucun contact ne matche ces tags." };
@@ -162,15 +165,14 @@ export async function launchCampaignAction(input: LaunchInput) {
   const { error: mErr } = await admin.from("messages_generated").insert(messages);
   if (mErr) return { error: mErr.message };
 
-  if (isManualLinkedIn) {
-    // Mode manuel : pas d'envoi automatique. L'utilisateur copie-colle depuis /campaigns/[id].
-    revalidatePath("/campaigns");
-    return { ok: true, campaignId: campaign.id, queued: messages.length, manual: true };
-  }
-
-  void processCampaignSend(userId, campaign.id).catch((e) =>
-    console.error("Campaign send error:", e)
-  );
+  // Utilise after() pour garantir que le traitement survit à la réponse du server action.
+  after(async () => {
+    try {
+      await processCampaignSend(userId, campaign.id);
+    } catch (e) {
+      console.error("Campaign send error:", e);
+    }
+  });
 
   revalidatePath("/campaigns");
   return { ok: true, campaignId: campaign.id, queued: messages.length };

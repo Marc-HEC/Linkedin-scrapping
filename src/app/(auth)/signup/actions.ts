@@ -1,6 +1,5 @@
 "use server";
 
-import { createSupabaseBrowser as createBrowserClientFn } from "@/lib/supabase/client";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { generateEncryptedDek } from "@/lib/crypto/encrypt";
 
