@@ -73,20 +73,22 @@ export default async function CampaignsPage() {
             const s = statsByCampaign.get(c.id) ?? {};
             const total = Object.values(s).reduce((a, b) => a + b, 0);
             return (
-              <Card key={c.id}>
-                <CardContent className="flex items-center justify-between p-4">
-                  <div>
-                    <div className="font-medium">{c.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {c.channel} · créée {new Date(c.created_at).toLocaleString("fr-FR")}
+              <Link key={c.id} href={`/campaigns/${c.id}`} className="block">
+                <Card className="transition-shadow hover:shadow-md">
+                  <CardContent className="flex items-center justify-between p-4">
+                    <div>
+                      <div className="font-medium">{c.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {c.channel} · créée {new Date(c.created_at).toLocaleString("fr-FR")}
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs">
-                    <Badge variant={c.status === "completed" ? "secondary" : "default"}>{c.status}</Badge>
-                    <span>{s.sent ?? 0} envoyés · {s.pending ?? 0} en attente · {s.failed ?? 0} échecs · {total} total</span>
-                  </div>
-                </CardContent>
-              </Card>
+                    <div className="flex items-center gap-3 text-xs">
+                      <Badge variant={c.status === "completed" ? "secondary" : "default"}>{c.status}</Badge>
+                      <span>{s.sent ?? 0} envoyés · {s.pending ?? 0} en attente · {s.failed ?? 0} échecs · {total} total</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
             );
           })}
         </div>

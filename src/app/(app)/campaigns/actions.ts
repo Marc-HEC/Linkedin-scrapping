@@ -69,6 +69,15 @@ export async function launchCampaignAction(input: LaunchInput) {
     .single();
   if (!tpl) return { error: "Template introuvable." };
 
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("linkedin_mode")
+    .eq("id", userId)
+    .single();
+  const linkedinMode = (profile?.linkedin_mode ?? "manual") as "manual" | "unipile";
+  const isLinkedIn = tpl.channel === "linkedin_connect" || tpl.channel === "linkedin_message";
+  const isManualLinkedIn = isLinkedIn && linkedinMode === "manual";
+
   const contacts = await previewMatchesAction(input.tagsPriority, input.dailyQuota);
   if (contacts.length === 0) return { error: "Aucun contact ne matche ces tags." };
 
@@ -107,14 +116,43 @@ export async function launchCampaignAction(input: LaunchInput) {
   const { error: mErr } = await admin.from("messages_generated").insert(messages);
   if (mErr) return { error: mErr.message };
 
-  // Envoie en arrière-plan (pas de bloquage UI). Note : sur Vercel serverless
-  // l'exécution s'arrête au retour ; pour du prod, prévoir une queue.
+  if (isManualLinkedIn) {
+    // Mode manuel : pas d'envoi automatique. L'utilisateur copie-colle depuis /campaigns/[id].
+    revalidatePath("/campaigns");
+    return { ok: true, campaignId: campaign.id, queued: messages.length, manual: true };
+  }
+
   void processCampaignSend(userId, campaign.id).catch((e) =>
     console.error("Campaign send error:", e)
   );
 
   revalidatePath("/campaigns");
   return { ok: true, campaignId: campaign.id, queued: messages.length };
+}
+
+export async function markMessageSentAction(messageId: string) {
+  const userId = await getUserId();
+  const admin = createSupabaseAdmin();
+  const { error } = await admin
+    .from("messages_generated")
+    .update({ status: "sent", sent_at: new Date().toISOString() })
+    .eq("id", messageId)
+    .eq("user_id", userId);
+  if (error) return { error: error.message };
+  revalidatePath("/campaigns");
+  return { ok: true };
+}
+
+export async function markCampaignCompletedAction(campaignId: string) {
+  const userId = await getUserId();
+  const admin = createSupabaseAdmin();
+  await admin
+    .from("campaigns")
+    .update({ status: "completed", completed_at: new Date().toISOString() })
+    .eq("id", campaignId)
+    .eq("user_id", userId);
+  revalidatePath("/campaigns");
+  return { ok: true };
 }
 
 async function processCampaignSend(userId: string, campaignId: string) {
