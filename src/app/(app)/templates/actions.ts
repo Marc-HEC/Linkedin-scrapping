@@ -32,6 +32,12 @@ export async function saveTemplateAction(fd: FormData) {
   };
   const parsed = templateSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0].message };
+  if (parsed.data.channel === "email" && !parsed.data.subject?.trim()) {
+    return { error: "L'objet est requis pour les emails." };
+  }
+  if (parsed.data.channel !== "email" && !parsed.data.subject?.trim()) {
+    parsed.data.subject = null;
+  }
 
   const variables = extractVariables(parsed.data.body_text + " " + (parsed.data.subject ?? ""));
   const admin = createSupabaseAdmin();

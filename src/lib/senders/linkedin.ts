@@ -170,6 +170,55 @@ class OutxLinkedinSender implements LinkedinSender {
 }
 
 // ============================================================
+// FallbackLinkedinSender : essaie primary, bascule sur fallback si erreur
+// ============================================================
+
+class FallbackLinkedinSender implements LinkedinSender {
+  readonly provider: LinkedinProviderName;
+
+  constructor(
+    private readonly primary: LinkedinSender,
+    private readonly fallback: LinkedinSender,
+  ) {
+    this.provider = primary.provider;
+  }
+
+  async sendConnectionRequest(input: SendConnectionInput): Promise<SendResult> {
+    try {
+      return await this.primary.sendConnectionRequest(input);
+    } catch (e) {
+      console.log(`[LinkedIn] primary (${this.primary.provider}) failed: ${(e as Error).message}, trying fallback (${this.fallback.provider})`);
+      try {
+        return await this.fallback.sendConnectionRequest(input);
+      } catch (fe) {
+        console.log(`[LinkedIn] fallback (${this.fallback.provider}) also failed: ${(fe as Error).message}`);
+        throw fe;
+      }
+    }
+  }
+
+  async sendMessage(input: SendMessageInput): Promise<SendResult> {
+    try {
+      return await this.primary.sendMessage(input);
+    } catch (e) {
+      console.log(`[LinkedIn] primary (${this.primary.provider}) failed: ${(e as Error).message}, trying fallback (${this.fallback.provider})`);
+      try {
+        return await this.fallback.sendMessage(input);
+      } catch (fe) {
+        console.log(`[LinkedIn] fallback (${this.fallback.provider}) also failed: ${(fe as Error).message}`);
+        throw fe;
+      }
+    }
+  }
+
+  async searchProfiles(params: LinkedinSearchParams): Promise<LinkedinProfileResult[]> {
+    const fn = this.primary.searchProfiles?.bind(this.primary) ?? this.fallback.searchProfiles?.bind(this.fallback);
+    if (!fn) throw new Error("searchProfiles not available on either provider");
+    return fn(params);
+  }
+}
+
+// ============================================================
 // Factory : sélectionne le provider configuré pour l'utilisateur
 // ============================================================
 
@@ -181,17 +230,25 @@ class OutxLinkedinSender implements LinkedinSender {
 export async function getLinkedinSenderForUser(userId: string): Promise<LinkedinSender> {
   const { getDecryptedCredential } = await import("@/app/(app)/integrations/actions");
 
-  const outx = await getDecryptedCredential<{ api_key: string; base_url?: string }>(userId, "outx");
-  if (outx?.api_key) {
-    const baseUrl = outx.base_url ?? process.env.OUTX_API_BASE_URL;
+  const [outxCreds, unipileCreds] = await Promise.all([
+    getDecryptedCredential<{ api_key: string; base_url?: string }>(userId, "outx"),
+    getDecryptedCredential<UnipileCreds>(userId, "unipile"),
+  ]);
+
+  let outxSender: OutxLinkedinSender | null = null;
+  if (outxCreds?.api_key) {
+    const baseUrl = outxCreds.base_url ?? process.env.OUTX_API_BASE_URL;
     if (!baseUrl) throw new Error("OUTX_API_BASE_URL is not set in environment");
-    return new OutxLinkedinSender(outx.api_key, baseUrl);
+    outxSender = new OutxLinkedinSender(outxCreds.api_key, baseUrl);
   }
 
-  const unipile = await getDecryptedCredential<UnipileCreds>(userId, "unipile");
-  if (unipile?.api_key && unipile.dsn && unipile.account_id) {
-    return new UnipileLinkedinSender(unipile);
-  }
+  const unipileSender =
+    unipileCreds?.api_key && unipileCreds.dsn && unipileCreds.account_id
+      ? new UnipileLinkedinSender(unipileCreds)
+      : null;
 
+  if (outxSender && unipileSender) return new FallbackLinkedinSender(outxSender, unipileSender);
+  if (outxSender) return outxSender;
+  if (unipileSender) return unipileSender;
   throw new Error("Aucune intégration LinkedIn configurée (OutX ou Unipile).");
 }

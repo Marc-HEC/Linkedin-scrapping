@@ -128,13 +128,12 @@ function TemplateEditor({
               <option value="linkedin_connect">Invitation LinkedIn (note 300 car.)</option>
               <option value="linkedin_message">Message LinkedIn</option>
             </select>
-            {channel === "email" && (
-              <Input
-                placeholder="Objet (peut contenir des variables)"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-              />
-            )}
+            <Input
+              placeholder={channel === "email" ? "Ex: Collaboration sur [projet]" : "Objet (optionnel) — Ex: Collaboration sur [projet]"}
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              required={channel === "email"}
+            />
             <Textarea
               rows={10}
               placeholder={"Bonjour [Prénom],\n\nJe vois que [NomEntreprise] se développe..."}
@@ -150,7 +149,7 @@ function TemplateEditor({
               ))}
             </div>
             <div className="flex gap-2">
-              <Button type="submit" disabled={saving || !name || !body}>
+              <Button type="submit" disabled={saving || !name || !body || (channel === "email" && !subject)}>
                 {saving ? "Enregistrement…" : "Enregistrer"}
               </Button>
               <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
@@ -161,7 +160,7 @@ function TemplateEditor({
             <div className="text-xs font-medium text-muted-foreground">
               Aperçu (ex: Marie Durand — CTO chez Acme)
             </div>
-            {channel === "email" && subject && (
+            {subject && (
               <div className="mt-2 rounded-md border bg-muted/30 p-2 text-sm">
                 <span className="text-xs text-muted-foreground">Objet :</span>{" "}
                 <HighlightedText original={subject} />
