@@ -12,6 +12,7 @@ const navItems = [
   { href: "/segments",      label: "Segments",        icon: "⊞" },
   { href: "/campaigns",     label: "Campagnes",       icon: "▶" },
   { href: "/integrations",  label: "Intégrations",    icon: "⚙" },
+  { href: "/settings/gdpr", label: "RGPD",            icon: "🛡" },
 ];
 
 export function Sidebar() {

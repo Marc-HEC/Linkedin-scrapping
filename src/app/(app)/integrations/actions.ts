@@ -5,13 +5,15 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { encryptWithDek, decryptWithDek, last4 } from "@/lib/crypto/encrypt";
 import {
   smtpSchema, mistralSchema, unipileSchema, dropcontactSchema,
+  outxSchema, apolloSchema,
   type SmtpConfig, type MistralConfig, type UnipileConfig, type DropcontactConfig,
+  type OutxConfig, type ApolloConfig,
 } from "@/schemas/integration.schema";
 
-type Provider = "smtp" | "mistral" | "unipile" | "dropcontact";
+type Provider = "smtp" | "mistral" | "unipile" | "dropcontact" | "outx" | "apollo";
 
-/** Récupère la DEK chiffrée de l'utilisateur via service_role */
-async function getUserDek(userId: string): Promise<Buffer> {
+/** Récupère la DEK chiffrée (base64 TEXT) de l'utilisateur via service_role */
+async function getUserDek(userId: string): Promise<string> {
   const admin = createSupabaseAdmin();
   const { data, error } = await admin
     .from("profiles")
@@ -19,7 +21,7 @@ async function getUserDek(userId: string): Promise<Buffer> {
     .eq("id", userId)
     .single();
   if (error || !data?.encrypted_dek) throw new Error("DEK introuvable");
-  return Buffer.from(data.encrypted_dek);
+  return data.encrypted_dek as string;
 }
 
 async function getAuthenticatedUser() {
@@ -146,6 +148,28 @@ export async function saveDropcontactAction(fd: FormData) {
   return { ok: true };
 }
 
+// ---- OutX ----
+export async function saveOutxAction(fd: FormData) {
+  const user = await getAuthenticatedUser();
+  const parsed = outxSchema.safeParse(Object.fromEntries(fd));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const cfg = parsed.data as OutxConfig;
+  await saveIntegration(user.id, "outx", cfg, last4(cfg.api_key));
+  return { ok: true };
+}
+
+// ---- Apollo ----
+export async function saveApolloAction(fd: FormData) {
+  const user = await getAuthenticatedUser();
+  const parsed = apolloSchema.safeParse(Object.fromEntries(fd));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const cfg = parsed.data as ApolloConfig;
+  await saveIntegration(user.id, "apollo", cfg, last4(cfg.api_key));
+  return { ok: true };
+}
+
 // ---- Suppression ----
 export async function deleteIntegrationAction(provider: Provider) {
   const user = await getAuthenticatedUser();
@@ -189,8 +213,8 @@ export async function getDecryptedCredential<T>(userId: string, provider: Provid
 
   const encryptedDek = await getUserDek(userId);
   return decryptWithDek<T>(encryptedDek, {
-    ciphertext: Buffer.from(data.encrypted_payload),
-    iv: Buffer.from(data.iv),
-    authTag: Buffer.from(data.auth_tag),
+    ciphertext: data.encrypted_payload as string,
+    iv: data.iv as string,
+    authTag: data.auth_tag as string,
   });
 }

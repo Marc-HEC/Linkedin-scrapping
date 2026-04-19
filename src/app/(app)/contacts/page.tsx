@@ -1,5 +1,6 @@
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { getContactsProvidersStatusAction } from "./actions";
 import { ContactsClient } from "./contacts-client";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,8 @@ export default async function ContactsPage() {
   const { data: tagsData } = await admin.rpc("list_user_tags", { p_user: user.id });
   const knownTags = (tagsData ?? []) as Array<{ tag: string; usage_count: number }>;
 
+  const providers = await getContactsProvidersStatusAction();
+
   return (
     <div className="max-w-6xl space-y-6">
       <div>
@@ -41,7 +44,11 @@ export default async function ContactsPage() {
           Tagge tes contacts. Les campagnes cibleront par tags (par ordre de priorité).
         </p>
       </div>
-      <ContactsClient contacts={contacts} knownTags={knownTags.map((t) => t.tag)} />
+      <ContactsClient
+        contacts={contacts}
+        knownTags={knownTags.map((t) => t.tag)}
+        providers={providers}
+      />
     </div>
   );
 }

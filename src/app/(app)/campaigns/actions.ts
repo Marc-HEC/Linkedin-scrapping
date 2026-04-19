@@ -6,7 +6,19 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { renderTemplate } from "@/lib/templating/render";
 import { getDecryptedCredential } from "../integrations/actions";
 import { sendViaSmtp, type SmtpCreds } from "@/lib/senders/email";
-import { sendViaUnipile, type UnipileCreds } from "@/lib/senders/linkedin";
+import { getLinkedinSenderForUser } from "@/lib/senders/linkedin";
+import { refineMessage, type MistralCreds } from "@/lib/ai/mistral";
+import { makeUnsubscribeToken } from "@/lib/crypto/encrypt";
+
+function appUrl(): string {
+  return (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+}
+
+function withUnsubFooter(userId: string, toEmail: string, body: string): string {
+  const token = makeUnsubscribeToken(userId, toEmail);
+  const url = `${appUrl()}/unsubscribe/${token}`;
+  return `${body}\n\n—\nPour ne plus recevoir ce type de message : ${url}`;
+}
 
 async function getUserId(): Promise<string> {
   const sb = await createSupabaseServer();
@@ -97,21 +109,54 @@ export async function launchCampaignAction(input: LaunchInput) {
     .single();
   if (cErr || !campaign) return { error: cErr?.message ?? "Erreur création campagne." };
 
-  // Génère les messages personnalisés (un par contact ciblé).
-  const messages = contacts.map((c) => {
-    const ctx = { ...c, ...(c.custom_fields ?? {}) };
-    const body = renderTemplate(tpl.body_text, ctx).output;
-    const subject = tpl.subject ? renderTemplate(tpl.subject, ctx).output : null;
-    return {
-      user_id: userId,
-      campaign_id: campaign.id,
-      contact_id: c.id,
-      channel: tpl.channel,
-      subject,
-      body_rendered: body,
-      status: "pending" as const,
-    };
-  });
+  // Filtre GDPR : exclut les contacts présents dans la suppression list (email match)
+  const emails = contacts.map((c) => c.email).filter(Boolean) as string[];
+  const suppressedSet = new Set<string>();
+  if (emails.length > 0) {
+    const { data: sup } = await admin
+      .from("suppression_list")
+      .select("email")
+      .eq("user_id", userId)
+      .in("email", emails);
+    for (const row of sup ?? []) suppressedSet.add(row.email);
+  }
+  const eligible = contacts.filter((c) => !c.email || !suppressedSet.has(c.email));
+  if (eligible.length === 0) {
+    return { error: "Tous les contacts ciblés sont dans ta liste de suppression." };
+  }
+
+  // Raffinement IA optionnel (si Mistral configuré) : adoucit/personnalise chaque message.
+  const mistralCreds = await getDecryptedCredential<MistralCreds>(userId, "mistral");
+  const rendered = await Promise.all(
+    eligible.map(async (c) => {
+      const ctx = { ...c, ...(c.custom_fields ?? {}) };
+      const body = renderTemplate(tpl.body_text, ctx).output;
+      const subject = tpl.subject ? renderTemplate(tpl.subject, ctx).output : null;
+      let finalBody = body;
+      let aiRefined = false;
+      if (mistralCreds) {
+        try {
+          finalBody = await refineMessage(mistralCreds, body);
+          aiRefined = true;
+        } catch (e) {
+          // Fallback silencieux sur le texte brut : on ne bloque jamais la campagne.
+          console.error("Mistral refine error (fallback to raw):", (e as Error).message);
+        }
+      }
+      return { contact_id: c.id, subject, body: finalBody, aiRefined };
+    })
+  );
+
+  const messages = rendered.map((r) => ({
+    user_id: userId,
+    campaign_id: campaign.id,
+    contact_id: r.contact_id,
+    channel: tpl.channel,
+    subject: r.subject,
+    body_rendered: r.body,
+    ai_refined: r.aiRefined,
+    status: "pending" as const,
+  }));
 
   const { error: mErr } = await admin.from("messages_generated").insert(messages);
   if (mErr) return { error: mErr.message };
@@ -195,7 +240,7 @@ async function processCampaignSend(userId: string, campaignId: string) {
         const providerId = await sendViaSmtp(creds, {
           to: c.email,
           subject: msg.subject ?? "",
-          text: msg.body_rendered,
+          text: withUnsubFooter(userId, c.email, msg.body_rendered),
         });
         await admin.from("messages_generated").update({
           status: "sent", sent_at: new Date().toISOString(), provider_message_id: providerId,
@@ -208,10 +253,12 @@ async function processCampaignSend(userId: string, campaignId: string) {
       await sleep(campaign.throttle_seconds * 1000);
     }
   } else {
-    // LinkedIn via Unipile
-    const creds = await getDecryptedCredential<UnipileCreds>(userId, "unipile");
-    if (!creds) {
-      await markAllFailed(campaignId, "Unipile non configuré.");
+    // LinkedIn via factory multi-provider (OutX prioritaire, fallback Unipile)
+    let sender;
+    try {
+      sender = await getLinkedinSenderForUser(userId);
+    } catch (e) {
+      await markAllFailed(campaignId, (e as Error).message);
       return;
     }
     for (const msg of pending) {
@@ -223,13 +270,11 @@ async function processCampaignSend(userId: string, campaignId: string) {
         continue;
       }
       try {
-        const providerId = await sendViaUnipile(creds, {
-          linkedin_url: c.linkedin_url,
-          text: msg.body_rendered,
-          mode: msg.channel === "linkedin_connect" ? "invite" : "message",
-        });
+        const result = msg.channel === "linkedin_connect"
+          ? await sender.sendConnectionRequest({ linkedin_url: c.linkedin_url, text: msg.body_rendered })
+          : await sender.sendMessage({ linkedin_url: c.linkedin_url, text: msg.body_rendered });
         await admin.from("messages_generated").update({
-          status: "sent", sent_at: new Date().toISOString(), provider_message_id: providerId,
+          status: "sent", sent_at: new Date().toISOString(), provider_message_id: result.providerMessageId,
         }).eq("id", msg.id);
       } catch (e) {
         await admin.from("messages_generated").update({

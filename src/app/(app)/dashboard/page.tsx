@@ -1,16 +1,33 @@
 import { createSupabaseServer } from "@/lib/supabase/server";
 
+type CampaignStats = {
+  total_messages: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  pending: number;
+  replied: number;
+  bounced: number;
+};
+
 export default async function DashboardPage() {
   const supabase = await createSupabaseServer();
+  const { data: { user } } = await supabase.auth.getUser();
   const { data: profile } = await supabase.from("profiles").select("full_name, onboarding_completed").single();
 
   const name = profile?.full_name?.split(" ")[0] ?? "là";
 
-  const [{ count: contactCount }, { count: campaignCount }, { count: templateCount }] = await Promise.all([
+  const [{ count: contactCount }, { count: campaignCount }, { count: templateCount }, statsRes] = await Promise.all([
     supabase.from("contacts").select("*", { count: "exact", head: true }),
     supabase.from("campaigns").select("*", { count: "exact", head: true }),
     supabase.from("templates").select("*", { count: "exact", head: true }),
+    user ? supabase.rpc("campaign_stats", { p_user: user.id }) : Promise.resolve({ data: null }),
   ]);
+
+  const stats = (statsRes?.data as CampaignStats[] | null)?.[0] ?? null;
+  const deliveryRate = stats && stats.total_messages > 0
+    ? Math.round((Number(stats.sent) / Number(stats.total_messages)) * 100)
+    : null;
 
   return (
     <div className="space-y-6">
@@ -44,6 +61,37 @@ export default async function DashboardPage() {
           </a>
         ))}
       </div>
+
+      {stats && stats.total_messages > 0 && (
+        <div className="rounded-lg border bg-background p-6 shadow-sm">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="font-semibold">Performance des campagnes</h2>
+            {deliveryRate !== null && (
+              <span className="text-sm text-muted-foreground">
+                Taux de livraison : <strong>{deliveryRate}%</strong>
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-4 gap-3 text-center">
+            {[
+              { label: "Envoyés", value: stats.sent, color: "text-emerald-600" },
+              { label: "Répondus", value: stats.replied, color: "text-indigo-600" },
+              { label: "Échecs", value: stats.failed, color: "text-destructive" },
+              { label: "Ignorés", value: stats.skipped, color: "text-muted-foreground" },
+            ].map((k) => (
+              <div key={k.label} className="rounded-md bg-muted/40 p-3">
+                <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
+                <p className="text-xs text-muted-foreground">{k.label}</p>
+              </div>
+            ))}
+          </div>
+          {stats.pending > 0 && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {stats.pending} message(s) en attente d&apos;envoi.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="rounded-lg border bg-background p-6 shadow-sm">
         <h2 className="font-semibold mb-3">Actions rapides</h2>

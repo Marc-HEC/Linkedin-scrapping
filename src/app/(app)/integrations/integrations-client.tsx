@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { CredentialForm } from "./components/credential-form";
 import {
   saveSMTPAction, saveMistralAction, saveUnipileAction,
-  saveDropcontactAction, deleteIntegrationAction,
+  saveDropcontactAction, saveOutxAction, saveApolloAction,
+  deleteIntegrationAction,
 } from "./actions";
 
 type Integration = { is_active: boolean; last4?: string; updated_at?: string } | undefined;
@@ -21,6 +22,8 @@ export function IntegrationsClient({ integrations }: Props) {
   const mistral = integrations["mistral"];
   const unipile = integrations["unipile"];
   const dropcontact = integrations["dropcontact"];
+  const outx = integrations["outx"];
+  const apollo = integrations["apollo"];
 
   return (
     <div className="space-y-4">
@@ -83,6 +86,20 @@ export function IntegrationsClient({ integrations }: Props) {
         onDisconnect={async () => { await deleteIntegrationAction("unipile"); refresh(); }}
       />
 
+      {/* OutX */}
+      <CredentialForm
+        title="LinkedIn — OutX (alternative)"
+        description="Provider LinkedIn alternatif, souvent moins cher qu'Unipile. Ajoute la recherche de profils. Si configuré, il est utilisé en priorité."
+        isConnected={!!(outx?.is_active)}
+        last4={outx?.last4}
+        updatedAt={outx?.updated_at}
+        fields={[
+          { name: "api_key", label: "Clé API OutX", type: "password", placeholder: "otx_...", required: true },
+        ]}
+        onSave={async (fd) => { const r = await saveOutxAction(fd); refresh(); return r; }}
+        onDisconnect={async () => { await deleteIntegrationAction("outx"); refresh(); }}
+      />
+
       {/* Dropcontact */}
       <CredentialForm
         title="Enrichissement — Dropcontact"
@@ -95,6 +112,20 @@ export function IntegrationsClient({ integrations }: Props) {
         ]}
         onSave={async (fd) => { const r = await saveDropcontactAction(fd); refresh(); return r; }}
         onDisconnect={async () => { await deleteIntegrationAction("dropcontact"); refresh(); }}
+      />
+
+      {/* Apollo */}
+      <CredentialForm
+        title="Contacts B2B — Apollo"
+        description="Recherche et import de leads depuis Apollo.io (plan gratuit disponible). Utilisé côté /contacts."
+        isConnected={!!(apollo?.is_active)}
+        last4={apollo?.last4}
+        updatedAt={apollo?.updated_at}
+        fields={[
+          { name: "api_key", label: "Clé API Apollo", type: "password", placeholder: "apollo_...", required: true },
+        ]}
+        onSave={async (fd) => { const r = await saveApolloAction(fd); refresh(); return r; }}
+        onDisconnect={async () => { await deleteIntegrationAction("apollo"); refresh(); }}
       />
 
       <div className="rounded-lg border border-muted bg-muted/30 p-4 text-xs text-muted-foreground space-y-1">

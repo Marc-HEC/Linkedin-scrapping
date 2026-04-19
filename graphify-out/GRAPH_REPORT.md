@@ -1,7 +1,7 @@
 # Graph Report - D:\TP info\outreach-app  (2026-04-19)
 
 ## Corpus Check
-- 46 files · ~12,681 words
+- 46 files · ~23,346 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -54,8 +54,8 @@
 10. `saveMistralAction()` - 6 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `launch()` --calls--> `launchCampaignAction()`  [INFERRED]
-  outreach-app\src\app\(app)\campaigns\new\new-campaign-client.tsx → outreach-app\src\app\(app)\campaigns\actions.ts
+- `launchCampaignAction()` --calls--> `launch()`  [INFERRED]
+  outreach-app\src\app\(app)\campaigns\actions.ts → outreach-app\src\app\(app)\campaigns\new\new-campaign-client.tsx
 - `AppLayout()` --calls--> `createSupabaseServer()`  [INFERRED]
   outreach-app\src\app\(app)\layout.tsx → outreach-app\src\lib\supabase\server.ts
 - `getUserId()` --calls--> `createSupabaseServer()`  [INFERRED]

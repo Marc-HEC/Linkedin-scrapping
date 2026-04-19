@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { getLinkedinSenderForUser } from "@/lib/senders/linkedin";
+import { searchPeople as apolloSearchPeople } from "@/lib/clients/apollo";
+import { enrichBatch as dropcontactEnrichBatch } from "@/lib/enrichment/dropcontact";
+import { getDecryptedCredential } from "../integrations/actions";
 
 async function getUserId(): Promise<string> {
   const sb = await createSupabaseServer();
@@ -158,6 +162,214 @@ export async function importContactsCsvAction(csvText: string) {
 
   revalidatePath("/contacts");
   return { ok: true, imported: count ?? toInsert.length };
+}
+
+// ============================================================
+// Recherche + import LinkedIn (provider OutX ou Unipile si expose searchProfiles)
+// ============================================================
+const searchSchema = z.object({
+  keywords: z.string().trim().min(1, "Mots-clés requis"),
+  title: z.string().trim().optional(),
+  company: z.string().trim().optional(),
+  location: z.string().trim().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+export async function searchAndImportLinkedinContactsAction(fd: FormData) {
+  const userId = await getUserId();
+  const parsed = searchSchema.safeParse(Object.fromEntries(fd));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  let sender;
+  try {
+    sender = await getLinkedinSenderForUser(userId);
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  if (!sender.searchProfiles) {
+    return { error: "Le provider actif ne supporte pas la recherche (configure OutX)." };
+  }
+
+  let profiles;
+  try {
+    profiles = await sender.searchProfiles(parsed.data);
+  } catch (e) {
+    return { error: `Recherche LinkedIn échouée : ${(e as Error).message}` };
+  }
+
+  const urls = profiles.map((p) => p.linkedin_url).filter(Boolean);
+  if (urls.length === 0) return { ok: true, imported: 0, skipped: 0 };
+
+  const admin = createSupabaseAdmin();
+  const { data: existing } = await admin
+    .from("contacts")
+    .select("linkedin_url")
+    .eq("user_id", userId)
+    .in("linkedin_url", urls);
+  const existingSet = new Set((existing ?? []).map((r) => r.linkedin_url));
+
+  const toInsert = profiles
+    .filter((p) => p.linkedin_url && !existingSet.has(p.linkedin_url))
+    .map((p) => {
+      const [first, ...rest] = (p.full_name || "").split(" ");
+      return {
+        user_id: userId,
+        first_name: first || null,
+        last_name: rest.join(" ") || null,
+        email: p.email || null,
+        linkedin_url: p.linkedin_url,
+        company_name: p.company || null,
+        role: p.title || p.headline || null,
+        source: `linkedin_search_${sender!.provider}`,
+      };
+    });
+
+  if (toInsert.length === 0) {
+    revalidatePath("/contacts");
+    return { ok: true, imported: 0, skipped: profiles.length };
+  }
+
+  const { error } = await admin.from("contacts").insert(toInsert);
+  if (error) return { error: error.message };
+
+  revalidatePath("/contacts");
+  return { ok: true, imported: toInsert.length, skipped: profiles.length - toInsert.length };
+}
+
+// ============================================================
+// Recherche + import Apollo
+// ============================================================
+export async function apolloSearchAndImportContactsAction(fd: FormData) {
+  const userId = await getUserId();
+  const parsed = searchSchema.safeParse(Object.fromEntries(fd));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const creds = await getDecryptedCredential<{ api_key: string }>(userId, "apollo");
+  if (!creds?.api_key) return { error: "Apollo non configuré (Intégrations → Apollo)." };
+
+  let leads;
+  try {
+    leads = await apolloSearchPeople(parsed.data, creds.api_key);
+  } catch (e) {
+    return { error: `Apollo : ${(e as Error).message}` };
+  }
+  if (leads.length === 0) return { ok: true, imported: 0, skipped: 0 };
+
+  // Dédup sur email OU linkedin_url (union des deux clés)
+  const emails = leads.map((l) => l.email).filter(Boolean) as string[];
+  const urls = leads.map((l) => l.linkedin_url).filter(Boolean) as string[];
+
+  const admin = createSupabaseAdmin();
+  const existingEmails = new Set<string>();
+  const existingUrls = new Set<string>();
+  if (emails.length > 0) {
+    const { data } = await admin.from("contacts").select("email").eq("user_id", userId).in("email", emails);
+    for (const r of data ?? []) if (r.email) existingEmails.add(r.email);
+  }
+  if (urls.length > 0) {
+    const { data } = await admin.from("contacts").select("linkedin_url").eq("user_id", userId).in("linkedin_url", urls);
+    for (const r of data ?? []) if (r.linkedin_url) existingUrls.add(r.linkedin_url);
+  }
+
+  const toInsert = leads
+    .filter((l) => {
+      if (l.email && existingEmails.has(l.email)) return false;
+      if (l.linkedin_url && existingUrls.has(l.linkedin_url)) return false;
+      return true;
+    })
+    .map((l) => ({
+      user_id: userId,
+      first_name: l.first_name || null,
+      last_name: l.last_name || null,
+      email: l.email || null,
+      linkedin_url: l.linkedin_url || null,
+      company_name: l.company || null,
+      role: l.title || null,
+      source: "apollo",
+    }));
+
+  if (toInsert.length === 0) {
+    revalidatePath("/contacts");
+    return { ok: true, imported: 0, skipped: leads.length };
+  }
+
+  const { error } = await admin.from("contacts").insert(toInsert);
+  if (error) return { error: error.message };
+
+  revalidatePath("/contacts");
+  return { ok: true, imported: toInsert.length, skipped: leads.length - toInsert.length };
+}
+
+// ============================================================
+// Enrichissement Dropcontact : emails pro manquants
+// ============================================================
+export async function enrichMissingEmailsWithDropcontactAction() {
+  const userId = await getUserId();
+  const creds = await getDecryptedCredential<{ api_key: string }>(userId, "dropcontact");
+  if (!creds?.api_key) return { error: "Dropcontact non configuré (Intégrations → Dropcontact)." };
+
+  const admin = createSupabaseAdmin();
+  const { data: targets } = await admin
+    .from("contacts")
+    .select("id, first_name, last_name, company_name")
+    .eq("user_id", userId)
+    .is("email", null)
+    .not("last_name", "is", null)
+    .not("company_name", "is", null)
+    .limit(50);
+
+  if (!targets || targets.length === 0) {
+    return { ok: true, enriched: 0, message: "Aucun contact à enrichir (email manquant + nom + entreprise requis)." };
+  }
+
+  let enriched;
+  try {
+    enriched = await dropcontactEnrichBatch(
+      targets.map((t) => ({
+        first_name: t.first_name ?? undefined,
+        last_name: t.last_name ?? undefined,
+        company: t.company_name ?? undefined,
+      })),
+      creds.api_key
+    );
+  } catch (e) {
+    return { error: `Dropcontact : ${(e as Error).message}` };
+  }
+
+  let updated = 0;
+  for (let i = 0; i < targets.length; i++) {
+    const row = enriched[i];
+    if (!row?.email) continue;
+    const { error } = await admin
+      .from("contacts")
+      .update({ email: row.email })
+      .eq("id", targets[i].id)
+      .eq("user_id", userId);
+    if (!error) updated++;
+  }
+
+  revalidatePath("/contacts");
+  return { ok: true, enriched: updated, total: targets.length };
+}
+
+// ============================================================
+// Statut providers (pour UI conditionnelle)
+// ============================================================
+export async function getContactsProvidersStatusAction() {
+  const userId = await getUserId();
+  const admin = createSupabaseAdmin();
+  const { data } = await admin
+    .from("user_integrations")
+    .select("provider, is_active")
+    .eq("user_id", userId)
+    .eq("is_active", true);
+  const providers = new Set((data ?? []).map((r) => r.provider));
+  return {
+    linkedin: providers.has("outx") || providers.has("unipile"),
+    linkedinSearch: providers.has("outx"), // seul OutX expose searchProfiles
+    apollo: providers.has("apollo"),
+    dropcontact: providers.has("dropcontact"),
+  };
 }
 
 export async function listUserTagsAction(): Promise<Array<{ tag: string; usage_count: number }>> {

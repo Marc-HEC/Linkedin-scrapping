@@ -11,7 +11,17 @@ import {
   updateContactTagsAction,
   deleteContactAction,
   importContactsCsvAction,
+  searchAndImportLinkedinContactsAction,
+  apolloSearchAndImportContactsAction,
+  enrichMissingEmailsWithDropcontactAction,
 } from "./actions";
+
+type Providers = {
+  linkedin: boolean;
+  linkedinSearch: boolean;
+  apollo: boolean;
+  dropcontact: boolean;
+};
 
 type Contact = {
   id: string;
@@ -27,15 +37,42 @@ type Contact = {
 export function ContactsClient({
   contacts,
   knownTags,
+  providers,
 }: {
   contacts: Contact[];
   knownTags: string[];
+  providers: Providers;
 }) {
   const [isPending, startTransition] = useTransition();
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [csvText, setCsvText] = useState("");
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [showLinkedIn, setShowLinkedIn] = useState(false);
+  const [showApollo, setShowApollo] = useState(false);
+  const [searchMsg, setSearchMsg] = useState<string | null>(null);
+  const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
+
+  async function handleLinkedinSearch(fd: FormData) {
+    setSearchMsg("Recherche en cours…");
+    const res = await searchAndImportLinkedinContactsAction(fd);
+    if (res.error) setSearchMsg(`Erreur : ${res.error}`);
+    else setSearchMsg(`${res.imported} importé(s), ${res.skipped ?? 0} doublon(s).`);
+  }
+
+  async function handleApolloSearch(fd: FormData) {
+    setSearchMsg("Recherche Apollo…");
+    const res = await apolloSearchAndImportContactsAction(fd);
+    if (res.error) setSearchMsg(`Erreur : ${res.error}`);
+    else setSearchMsg(`${res.imported} importé(s), ${res.skipped ?? 0} doublon(s).`);
+  }
+
+  async function handleEnrich() {
+    setEnrichMsg("Enrichissement en cours (jusqu'à 2 min)…");
+    const res = await enrichMissingEmailsWithDropcontactAction();
+    if (res.error) setEnrichMsg(`Erreur : ${res.error}`);
+    else setEnrichMsg(res.message ?? `${res.enriched}/${res.total} contact(s) enrichi(s).`);
+  }
 
   async function handleAdd(fd: FormData) {
     const res = await createContactAction(fd);
@@ -59,6 +96,25 @@ export function ContactsClient({
         <Button variant="outline" onClick={() => setShowImport((v) => !v)}>
           Importer un CSV
         </Button>
+        {providers.linkedinSearch && (
+          <Button variant="outline" onClick={() => { setShowLinkedIn((v) => !v); setSearchMsg(null); }}>
+            Rechercher sur LinkedIn
+          </Button>
+        )}
+        {providers.apollo && (
+          <Button variant="outline" onClick={() => { setShowApollo((v) => !v); setSearchMsg(null); }}>
+            Importer depuis Apollo
+          </Button>
+        )}
+        {providers.dropcontact && (
+          <Button
+            variant="ghost"
+            onClick={() => startTransition(handleEnrich)}
+            disabled={isPending}
+          >
+            Enrichir emails (Dropcontact)
+          </Button>
+        )}
         {knownTags.length > 0 && (
           <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
             Tags existants :
@@ -114,6 +170,62 @@ export function ContactsClient({
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {showLinkedIn && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Recherche LinkedIn (via OutX)</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Les profils trouvés seront créés en contacts (les doublons par URL LinkedIn sont ignorés).
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form action={(fd) => startTransition(() => handleLinkedinSearch(fd))} className="grid grid-cols-2 gap-3">
+              <Input name="keywords" placeholder="Mots-clés (ex: CTO SaaS France)" required className="col-span-2" />
+              <Input name="title" placeholder="Titre (optionnel)" />
+              <Input name="company" placeholder="Entreprise (optionnel)" />
+              <Input name="location" placeholder="Localisation (optionnel)" />
+              <Input name="limit" type="number" min={1} max={100} placeholder="Limite" defaultValue="25" />
+              <div className="col-span-2 flex gap-2 items-center">
+                <Button type="submit" disabled={isPending}>Rechercher</Button>
+                <Button type="button" variant="ghost" onClick={() => setShowLinkedIn(false)}>Fermer</Button>
+                {searchMsg && <span className="text-sm text-muted-foreground">{searchMsg}</span>}
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {showApollo && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Import depuis Apollo</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Recherche de leads B2B. Dédoublonne automatiquement sur email et URL LinkedIn.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form action={(fd) => startTransition(() => handleApolloSearch(fd))} className="grid grid-cols-2 gap-3">
+              <Input name="keywords" placeholder="Mots-clés" required className="col-span-2" />
+              <Input name="title" placeholder="Titre (ex: Head of Sales)" />
+              <Input name="company" placeholder="Entreprise" />
+              <Input name="location" placeholder="Localisation (ex: France)" />
+              <Input name="limit" type="number" min={1} max={100} placeholder="Limite" defaultValue="25" />
+              <div className="col-span-2 flex gap-2 items-center">
+                <Button type="submit" disabled={isPending}>Importer</Button>
+                <Button type="button" variant="ghost" onClick={() => setShowApollo(false)}>Fermer</Button>
+                {searchMsg && <span className="text-sm text-muted-foreground">{searchMsg}</span>}
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {enrichMsg && (
+        <div className="rounded-md border border-muted bg-muted/30 px-3 py-2 text-sm">
+          {enrichMsg}
+        </div>
       )}
 
       <Card>

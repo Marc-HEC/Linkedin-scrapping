@@ -1,13 +1,61 @@
-// Envoi LinkedIn via Unipile (API officielle compatible CGU LinkedIn).
-// Doc : https://developer.unipile.com/
-// L'utilisateur doit fournir :
-//  - api_key : clé X-API-KEY
-//  - dsn : le sous-domaine/port attribués (ex: api8.unipile.com:13851)
-//  - account_id : l'account Unipile LinkedIn connecté
+// Provider LinkedIn : interface commune pour Unipile + OutX, avec factory par user.
+// Unipile = API officielle partenaire LinkedIn (recommandée, conforme CGU).
+// OutX = alternative souvent moins chère. Priorise OutX si configuré, fallback Unipile.
+
+import "server-only";
+
+// ============================================================
+// Types communs
+// ============================================================
+
+export type LinkedinProviderName = "unipile" | "outx";
+
+export interface LinkedinSearchParams {
+  keywords: string;
+  title?: string;
+  company?: string;
+  location?: string;
+  limit?: number;
+}
+
+export interface LinkedinProfileResult {
+  full_name: string;
+  linkedin_url: string;
+  headline?: string;
+  company?: string;
+  title?: string;
+  location?: string;
+  email?: string;
+}
+
+export type SendConnectionInput = {
+  linkedin_url: string;
+  text: string; // message de l'invitation (max ~300 chars)
+};
+
+export type SendMessageInput = {
+  linkedin_url: string;
+  text: string;
+};
+
+export type SendResult = {
+  providerMessageId: string;
+};
+
+export interface LinkedinSender {
+  readonly provider: LinkedinProviderName;
+  sendConnectionRequest(input: SendConnectionInput): Promise<SendResult>;
+  sendMessage(input: SendMessageInput): Promise<SendResult>;
+  searchProfiles?(params: LinkedinSearchParams): Promise<LinkedinProfileResult[]>;
+}
+
+// ============================================================
+// Implémentation Unipile (legacy — conserve API existante)
+// ============================================================
 
 export type UnipileCreds = {
   api_key: string;
-  dsn: string;        // ex: api8.unipile.com:13851
+  dsn: string; // ex: api8.unipile.com:13851
   account_id: string; // id du compte LinkedIn dans Unipile
 };
 
@@ -17,16 +65,19 @@ export type UnipilePayload = {
   mode: "invite" | "message";
 };
 
-function base(dsn: string): string {
+function unipileBase(dsn: string): string {
   return dsn.startsWith("http") ? dsn : `https://${dsn}/api/v1`;
 }
 
-async function resolveProviderId(creds: UnipileCreds, linkedinUrl: string): Promise<string> {
-  // Unipile : GET /users/{public_identifier}?account_id=...
+function extractLinkedInSlug(url: string): string | null {
+  const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+async function unipileResolveProviderId(creds: UnipileCreds, linkedinUrl: string): Promise<string> {
   const publicId = extractLinkedInSlug(linkedinUrl);
   if (!publicId) throw new Error(`URL LinkedIn invalide: ${linkedinUrl}`);
-
-  const url = `${base(creds.dsn)}/users/${encodeURIComponent(publicId)}?account_id=${encodeURIComponent(creds.account_id)}`;
+  const url = `${unipileBase(creds.dsn)}/users/${encodeURIComponent(publicId)}?account_id=${encodeURIComponent(creds.account_id)}`;
   const res = await fetch(url, { headers: { "X-API-KEY": creds.api_key } });
   if (!res.ok) throw new Error(`Unipile lookup ${res.status}: ${await res.text()}`);
   const json = (await res.json()) as { provider_id?: string; id?: string };
@@ -35,21 +86,14 @@ async function resolveProviderId(creds: UnipileCreds, linkedinUrl: string): Prom
   return pid;
 }
 
-function extractLinkedInSlug(url: string): string | null {
-  const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
-  return m ? decodeURIComponent(m[1]) : null;
-}
-
+/** @deprecated Utilise `getLinkedinSenderForUser(userId)` + `.sendMessage/.sendConnectionRequest` */
 export async function sendViaUnipile(creds: UnipileCreds, payload: UnipilePayload): Promise<string> {
-  const providerId = await resolveProviderId(creds, payload.linkedin_url);
+  const providerId = await unipileResolveProviderId(creds, payload.linkedin_url);
 
   if (payload.mode === "invite") {
-    const res = await fetch(`${base(creds.dsn)}/users/invite`, {
+    const res = await fetch(`${unipileBase(creds.dsn)}/users/invite`, {
       method: "POST",
-      headers: {
-        "X-API-KEY": creds.api_key,
-        "Content-Type": "application/json",
-      },
+      headers: { "X-API-KEY": creds.api_key, "Content-Type": "application/json" },
       body: JSON.stringify({
         account_id: creds.account_id,
         provider_id: providerId,
@@ -61,13 +105,9 @@ export async function sendViaUnipile(creds: UnipileCreds, payload: UnipilePayloa
     return json.invitation_id ?? json.id ?? "unipile-invite-sent";
   }
 
-  // Message direct (crée un chat s'il n'existe pas)
-  const res = await fetch(`${base(creds.dsn)}/chats`, {
+  const res = await fetch(`${unipileBase(creds.dsn)}/chats`, {
     method: "POST",
-    headers: {
-      "X-API-KEY": creds.api_key,
-      "Content-Type": "application/json",
-    },
+    headers: { "X-API-KEY": creds.api_key, "Content-Type": "application/json" },
     body: JSON.stringify({
       account_id: creds.account_id,
       attendees_ids: [providerId],
@@ -77,4 +117,77 @@ export async function sendViaUnipile(creds: UnipileCreds, payload: UnipilePayloa
   if (!res.ok) throw new Error(`Unipile message ${res.status}: ${await res.text()}`);
   const json = (await res.json()) as { chat_id?: string; id?: string };
   return json.chat_id ?? json.id ?? "unipile-message-sent";
+}
+
+class UnipileLinkedinSender implements LinkedinSender {
+  readonly provider = "unipile" as const;
+  constructor(private readonly creds: UnipileCreds) {}
+
+  async sendConnectionRequest(input: SendConnectionInput): Promise<SendResult> {
+    const id = await sendViaUnipile(this.creds, {
+      linkedin_url: input.linkedin_url,
+      text: input.text,
+      mode: "invite",
+    });
+    return { providerMessageId: id };
+  }
+
+  async sendMessage(input: SendMessageInput): Promise<SendResult> {
+    const id = await sendViaUnipile(this.creds, {
+      linkedin_url: input.linkedin_url,
+      text: input.text,
+      mode: "message",
+    });
+    return { providerMessageId: id };
+  }
+
+  // Unipile n'expose pas de recherche profil stable via API partenaire :
+  // on laisse `searchProfiles` undefined pour que la factory puisse router vers OutX.
+}
+
+// ============================================================
+// Implémentation OutX (via client dédié)
+// ============================================================
+
+class OutxLinkedinSender implements LinkedinSender {
+  readonly provider = "outx" as const;
+  constructor(private readonly apiKey: string) {}
+
+  async sendConnectionRequest(input: SendConnectionInput): Promise<SendResult> {
+    const { sendConnectionRequest } = await import("@/lib/clients/outx");
+    return sendConnectionRequest(input, this.apiKey);
+  }
+
+  async sendMessage(input: SendMessageInput): Promise<SendResult> {
+    const { sendMessage } = await import("@/lib/clients/outx");
+    return sendMessage(input, this.apiKey);
+  }
+
+  async searchProfiles(params: LinkedinSearchParams): Promise<LinkedinProfileResult[]> {
+    const { searchProfiles } = await import("@/lib/clients/outx");
+    return searchProfiles(params, this.apiKey);
+  }
+}
+
+// ============================================================
+// Factory : sélectionne le provider configuré pour l'utilisateur
+// ============================================================
+
+/**
+ * Retourne un sender LinkedIn selon l'intégration active du user.
+ * Priorité : OutX (si configuré) > Unipile (fallback).
+ * Throw si aucun provider configuré.
+ */
+export async function getLinkedinSenderForUser(userId: string): Promise<LinkedinSender> {
+  const { getDecryptedCredential } = await import("@/app/(app)/integrations/actions");
+
+  const outx = await getDecryptedCredential<{ api_key: string }>(userId, "outx");
+  if (outx?.api_key) return new OutxLinkedinSender(outx.api_key);
+
+  const unipile = await getDecryptedCredential<UnipileCreds>(userId, "unipile");
+  if (unipile?.api_key && unipile.dsn && unipile.account_id) {
+    return new UnipileLinkedinSender(unipile);
+  }
+
+  throw new Error("Aucune intégration LinkedIn configurée (OutX ou Unipile).");
 }

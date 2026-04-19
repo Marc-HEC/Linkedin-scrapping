@@ -25,7 +25,17 @@ export const dropcontactSchema = z.object({
   api_key: z.string().min(10, "Clé API Dropcontact invalide"),
 });
 
+export const outxSchema = z.object({
+  api_key: z.string().min(10, "Clé API OutX invalide"),
+});
+
+export const apolloSchema = z.object({
+  api_key: z.string().min(10, "Clé API Apollo invalide"),
+});
+
 export type SmtpConfig = z.infer<typeof smtpSchema>;
 export type MistralConfig = z.infer<typeof mistralSchema>;
 export type UnipileConfig = z.infer<typeof unipileSchema>;
 export type DropcontactConfig = z.infer<typeof dropcontactSchema>;
+export type OutxConfig = z.infer<typeof outxSchema>;
+export type ApolloConfig = z.infer<typeof apolloSchema>;
