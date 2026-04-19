@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { markMessageSentAction, markCampaignCompletedAction } from "../actions";
+import { markCampaignCompletedAction } from "../actions";
 
 type Row = {
   id: string;
@@ -28,35 +28,15 @@ export function CampaignDetailClient({
   campaignId,
   campaignStatus,
   rows,
-  manualMode,
   channel,
 }: {
   campaignId: string;
   campaignStatus: string;
   rows: Row[];
-  manualMode: boolean;
   channel: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  async function copyAndMark(row: Row) {
-    await navigator.clipboard.writeText(row.body);
-    setCopiedId(row.id);
-    setTimeout(() => setCopiedId((id) => (id === row.id ? null : id)), 1500);
-    startTransition(async () => {
-      await markMessageSentAction(row.id);
-      router.refresh();
-    });
-  }
-
-  async function markSent(row: Row) {
-    startTransition(async () => {
-      await markMessageSentAction(row.id);
-      router.refresh();
-    });
-  }
 
   async function completeCampaign() {
     startTransition(async () => {
@@ -69,18 +49,6 @@ export function CampaignDetailClient({
 
   return (
     <div className="space-y-4">
-      {manualMode && (
-        <Card>
-          <CardContent className="space-y-1 p-4 text-sm">
-            <p className="font-medium">Mode LinkedIn manuel</p>
-            <p className="text-muted-foreground">
-              Clique « Copier » sur chaque message : le texte est copié dans ton presse-papier et marqué comme envoyé.
-              Colle-le ensuite dans LinkedIn. Respecte les limites safe : ~15 invitations/jour, ~100 messages/jour.
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
       {campaignStatus !== "completed" && pendingCount === 0 && rows.length > 0 && (
         <Card>
           <CardContent className="flex items-center justify-between p-4 text-sm">
@@ -129,16 +97,6 @@ export function CampaignDetailClient({
                     <p className="text-xs text-muted-foreground">
                       Envoyé {new Date(row.sent_at).toLocaleString("fr-FR")}
                     </p>
-                  )}
-                  {row.status === "pending" && manualMode && (
-                    <div className="flex gap-2">
-                      <Button size="sm" onClick={() => copyAndMark(row)} disabled={isPending}>
-                        {copiedId === row.id ? "Copié ✓" : "Copier et marquer envoyé"}
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => markSent(row)} disabled={isPending}>
-                        Marquer envoyé
-                      </Button>
-                    </div>
                   )}
                 </CardContent>
               </Card>

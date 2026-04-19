@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { renderTemplate } from "@/lib/templating/render";
-import { getDecryptedCredential, hasActiveLinkedinIntegration } from "../integrations/actions";
+import { getDecryptedCredential } from "../integrations/actions";
 import { sendViaSmtp, type SmtpCreds } from "@/lib/senders/email";
 import { getLinkedinSenderForUser } from "@/lib/senders/linkedin";
 import { refineMessage, type MistralCreds } from "@/lib/ai/mistral";
@@ -83,10 +83,16 @@ export async function launchCampaignAction(input: LaunchInput) {
   if (!tpl) return { error: "Template introuvable." };
 
   const isLinkedIn = tpl.channel === "linkedin_connect" || tpl.channel === "linkedin_message";
-  // Détection dynamique : si le user a une intégration LinkedIn active (OutX ou Unipile),
-  // on envoie automatiquement. Sinon, mode manuel (copier-coller).
-  const hasLinkedin = isLinkedIn ? await hasActiveLinkedinIntegration(userId) : false;
-  const isManualLinkedIn = isLinkedIn && !hasLinkedin;
+
+  // Validation anticipée : si campagne LinkedIn, on vérifie que l'intégration existe
+  // AVANT de créer la campagne. Échec immédiat avec message clair sinon.
+  if (isLinkedIn) {
+    try {
+      await getLinkedinSenderForUser(userId);
+    } catch {
+      return { error: "Aucune intégration LinkedIn configurée. Va dans Intégrations pour configurer OutX ou Unipile." };
+    }
+  }
 
   const contacts = await previewMatchesAction(input.tagsPriority, input.dailyQuota);
   if (contacts.length === 0) return { error: "Aucun contact ne matche ces tags." };
@@ -158,12 +164,6 @@ export async function launchCampaignAction(input: LaunchInput) {
 
   const { error: mErr } = await admin.from("messages_generated").insert(messages);
   if (mErr) return { error: mErr.message };
-
-  if (isManualLinkedIn) {
-    // Mode manuel : pas d'envoi automatique. L'utilisateur copie-colle depuis /campaigns/[id].
-    revalidatePath("/campaigns");
-    return { ok: true, campaignId: campaign.id, queued: messages.length, manual: true };
-  }
 
   // Utilise after() pour garantir que le traitement survit à la réponse du server action.
   after(async () => {

@@ -2,7 +2,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
-import { hasActiveLinkedinIntegration } from "@/app/(app)/integrations/actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CampaignDetailClient } from "./campaign-detail-client";
@@ -46,10 +45,6 @@ export default async function CampaignDetailPage({
   const contactsMap = new Map(
     (contacts ?? []).map((c) => [c.id, c])
   );
-
-  const isLinkedIn = campaign.channel === "linkedin_connect" || campaign.channel === "linkedin_message";
-  const hasLinkedin = isLinkedIn ? await hasActiveLinkedinIntegration(user.id) : false;
-  const isManualMode = isLinkedIn && !hasLinkedin;
 
   const statusCounts = msgs.reduce<Record<string, number>>((acc, m) => {
     acc[m.status] = (acc[m.status] ?? 0) + 1;
@@ -100,7 +95,6 @@ export default async function CampaignDetailPage({
         campaignId={campaign.id}
         campaignStatus={campaign.status}
         rows={rows}
-        manualMode={isManualMode}
         channel={campaign.channel}
       />
     </div>
