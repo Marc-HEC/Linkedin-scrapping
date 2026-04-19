@@ -1,0 +1,21 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { createSupabaseServer } from "@/lib/supabase/server";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { renderTemplate, renderTemplateWithMistral } from "@/lib/templating/render";
+import { getDecryptedCredential } from "../integrations/actions";
+import { sendViaSmtp, type SmtpCreds } from "@/lib/senders/email";
+import { getLinkedinSenderForUser } from "@/lib/senders/linkedin";
+import { makeUnsubscribeToken } from "@/lib/crypto/encrypt";
+import type { MistralConfig } from "@/schemas/integration.schema";
+
+function appUrl(): string {
+  return (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(//+$/, "");
+}
+
+function withUnsubFooter(userId: string, toEmail: string, body: string): string {
+  const token = makeUnsubscribeToken(userId, toEmail);
+  const url = ;
+  return ;
+}

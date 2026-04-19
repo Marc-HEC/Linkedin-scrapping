@@ -151,21 +151,21 @@ class UnipileLinkedinSender implements LinkedinSender {
 
 class OutxLinkedinSender implements LinkedinSender {
   readonly provider = "outx" as const;
-  constructor(private readonly apiKey: string) {}
+  constructor(private readonly apiKey: string, private readonly baseUrl: string) {}
 
   async sendConnectionRequest(input: SendConnectionInput): Promise<SendResult> {
     const { sendConnectionRequest } = await import("@/lib/clients/outx");
-    return sendConnectionRequest(input, this.apiKey);
+    return sendConnectionRequest(input, this.apiKey, this.baseUrl);
   }
 
   async sendMessage(input: SendMessageInput): Promise<SendResult> {
     const { sendMessage } = await import("@/lib/clients/outx");
-    return sendMessage(input, this.apiKey);
+    return sendMessage(input, this.apiKey, this.baseUrl);
   }
 
   async searchProfiles(params: LinkedinSearchParams): Promise<LinkedinProfileResult[]> {
     const { searchProfiles } = await import("@/lib/clients/outx");
-    return searchProfiles(params, this.apiKey);
+    return searchProfiles(params, this.apiKey, this.baseUrl);
   }
 }
 
@@ -181,8 +181,12 @@ class OutxLinkedinSender implements LinkedinSender {
 export async function getLinkedinSenderForUser(userId: string): Promise<LinkedinSender> {
   const { getDecryptedCredential } = await import("@/app/(app)/integrations/actions");
 
-  const outx = await getDecryptedCredential<{ api_key: string }>(userId, "outx");
-  if (outx?.api_key) return new OutxLinkedinSender(outx.api_key);
+  const outx = await getDecryptedCredential<{ api_key: string; base_url?: string }>(userId, "outx");
+  if (outx?.api_key) {
+    const baseUrl = outx.base_url ?? process.env.OUTX_API_BASE_URL;
+    if (!baseUrl) throw new Error("OUTX_API_BASE_URL is not set in environment");
+    return new OutxLinkedinSender(outx.api_key, baseUrl);
+  }
 
   const unipile = await getDecryptedCredential<UnipileCreds>(userId, "unipile");
   if (unipile?.api_key && unipile.dsn && unipile.account_id) {

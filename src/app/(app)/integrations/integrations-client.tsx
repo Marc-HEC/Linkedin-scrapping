@@ -95,6 +95,7 @@ export function IntegrationsClient({ integrations }: Props) {
         updatedAt={outx?.updated_at}
         fields={[
           { name: "api_key", label: "Clé API OutX", type: "password", placeholder: "otx_...", required: true },
+          { name: "base_url", label: "API Base URL", placeholder: "https://api.outx.ai", defaultValue: "https://api.outx.ai", required: true },
         ]}
         onSave={async (fd) => { const r = await saveOutxAction(fd); refresh(); return r; }}
         onDisconnect={async () => { await deleteIntegrationAction("outx"); refresh(); }}

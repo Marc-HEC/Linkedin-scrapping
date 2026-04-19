@@ -91,7 +91,8 @@ export function NewCampaignClient({
     });
     setLaunching(false);
     if (res.error) { alert(res.error); return; }
-    router.push("/campaigns");
+    // Redirige vers la page de révision (les messages sont générés par Mistral, pas encore envoyés)
+    router.push(res.campaignId ? `/campaigns/${res.campaignId}` : "/campaigns");
   }
 
   return (

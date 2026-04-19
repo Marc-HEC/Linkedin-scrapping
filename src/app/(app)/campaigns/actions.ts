@@ -4,12 +4,12 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
-import { renderTemplate } from "@/lib/templating/render";
+import { renderTemplate, renderTemplateWithMistral } from "@/lib/templating/render";
 import { getDecryptedCredential } from "../integrations/actions";
 import { sendViaSmtp, type SmtpCreds } from "@/lib/senders/email";
 import { getLinkedinSenderForUser } from "@/lib/senders/linkedin";
-import { refineMessage, type MistralCreds } from "@/lib/ai/mistral";
 import { makeUnsubscribeToken } from "@/lib/crypto/encrypt";
+import type { MistralConfig } from "@/schemas/integration.schema";
 
 function appUrl(): string {
   return (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
@@ -65,6 +65,8 @@ type LaunchInput = {
   throttleSeconds: number;
 };
 
+// Étape 1 : génère les messages avec Mistral et crée la campagne en statut "draft".
+// L'utilisateur accède ensuite à /campaigns/[id] pour réviser avant d'envoyer.
 export async function launchCampaignAction(input: LaunchInput) {
   const userId = await getUserId();
 
@@ -82,35 +84,10 @@ export async function launchCampaignAction(input: LaunchInput) {
     .single();
   if (!tpl) return { error: "Template introuvable." };
 
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("linkedin_mode")
-    .eq("id", userId)
-    .single();
-  const linkedinMode = (profile?.linkedin_mode ?? "manual") as "manual" | "unipile";
-  const isLinkedIn = tpl.channel === "linkedin_connect" || tpl.channel === "linkedin_message";
-  const isManualLinkedIn = isLinkedIn && linkedinMode === "manual";
-
   const contacts = await previewMatchesAction(input.tagsPriority, input.dailyQuota);
   if (contacts.length === 0) return { error: "Aucun contact ne matche ces tags." };
 
-  const { data: campaign, error: cErr } = await admin
-    .from("campaigns")
-    .insert({
-      user_id: userId,
-      name: input.name,
-      channel: tpl.channel,
-      template_id: tpl.id,
-      status: "sending",
-      daily_quota: input.dailyQuota,
-      throttle_seconds: input.throttleSeconds,
-      started_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-  if (cErr || !campaign) return { error: cErr?.message ?? "Erreur création campagne." };
-
-  // Filtre GDPR : exclut les contacts présents dans la suppression list (email match)
+  // Filtre GDPR
   const emails = contacts.map((c) => c.email).filter(Boolean) as string[];
   const suppressedSet = new Set<string>();
   if (emails.length > 0) {
@@ -126,25 +103,51 @@ export async function launchCampaignAction(input: LaunchInput) {
     return { error: "Tous les contacts ciblés sont dans ta liste de suppression." };
   }
 
-  // Raffinement IA optionnel (si Mistral configuré) : adoucit/personnalise chaque message.
-  const mistralCreds = await getDecryptedCredential<MistralCreds>(userId, "mistral");
+  const { data: campaign, error: cErr } = await admin
+    .from("campaigns")
+    .insert({
+      user_id: userId,
+      name: input.name,
+      channel: tpl.channel,
+      template_id: tpl.id,
+      status: "draft",
+      daily_quota: input.dailyQuota,
+      throttle_seconds: input.throttleSeconds,
+    })
+    .select("id")
+    .single();
+  if (cErr || !campaign) return { error: cErr?.message ?? "Erreur création campagne." };
+
+  const mistralCreds = await getDecryptedCredential<MistralConfig>(userId, "mistral");
+
   const rendered = await Promise.all(
     eligible.map(async (c) => {
       const ctx = { ...c, ...(c.custom_fields ?? {}) };
-      const body = renderTemplate(tpl.body_text, ctx).output;
-      const subject = tpl.subject ? renderTemplate(tpl.subject, ctx).output : null;
-      let finalBody = body;
+      let body: string;
       let aiRefined = false;
-      if (mistralCreds) {
+      if (mistralCreds?.api_key) {
         try {
-          finalBody = await refineMessage(mistralCreds, body);
+          body = await renderTemplateWithMistral(tpl.body_text, ctx, mistralCreds);
           aiRefined = true;
-        } catch (e) {
-          // Fallback silencieux sur le texte brut : on ne bloque jamais la campagne.
-          console.error("Mistral refine error (fallback to raw):", (e as Error).message);
+        } catch {
+          body = renderTemplate(tpl.body_text, ctx).output;
+        }
+      } else {
+        body = renderTemplate(tpl.body_text, ctx).output;
+      }
+      let subject: string | null = null;
+      if (tpl.subject) {
+        if (mistralCreds?.api_key) {
+          try {
+            subject = await renderTemplateWithMistral(tpl.subject, ctx, mistralCreds);
+          } catch {
+            subject = renderTemplate(tpl.subject, ctx).output;
+          }
+        } else {
+          subject = renderTemplate(tpl.subject, ctx).output;
         }
       }
-      return { contact_id: c.id, subject, body: finalBody, aiRefined };
+      return { contact_id: c.id, subject, body, aiRefined };
     })
   );
 
@@ -162,60 +165,139 @@ export async function launchCampaignAction(input: LaunchInput) {
   const { error: mErr } = await admin.from("messages_generated").insert(messages);
   if (mErr) return { error: mErr.message };
 
-  if (isManualLinkedIn) {
-    // Mode manuel : pas d'envoi automatique. L'utilisateur copie-colle depuis /campaigns/[id].
-    revalidatePath("/campaigns");
-    return { ok: true, campaignId: campaign.id, queued: messages.length, manual: true };
-  }
-
-  void processCampaignSend(userId, campaign.id).catch((e) =>
-    console.error("Campaign send error:", e)
-  );
-
   revalidatePath("/campaigns");
-  return { ok: true, campaignId: campaign.id, queued: messages.length };
+  // Retourne le campaignId pour rediriger vers la page de révision
+  return { ok: true, campaignId: campaign.id, queued: messages.length, needsReview: true };
 }
 
-export async function markMessageSentAction(messageId: string) {
+// Étape 2 : l'utilisateur a révisé les messages et valide l'envoi.
+export async function confirmAndSendCampaignAction(campaignId: string) {
   const userId = await getUserId();
   const admin = createSupabaseAdmin();
-  const { error } = await admin
-    .from("messages_generated")
-    .update({ status: "sent", sent_at: new Date().toISOString() })
-    .eq("id", messageId)
-    .eq("user_id", userId);
-  if (error) return { error: error.message };
+
+  const { data: campaign } = await admin
+    .from("campaigns")
+    .select("status, user_id")
+    .eq("id", campaignId)
+    .eq("user_id", userId)
+    .single();
+  if (!campaign) return { error: "Campagne introuvable." };
+  if (campaign.status !== "draft") return { error: "Campagne déjà lancée." };
+
+  await admin
+    .from("campaigns")
+    .update({ status: "sending", started_at: new Date().toISOString() })
+    .eq("id", campaignId);
+
+  after(() =>
+    processCampaignSend(userId, campaignId).catch((e) =>
+      console.error("[Campaign send error]", campaignId, e)
+    )
+  );
+
   revalidatePath("/campaigns");
   return { ok: true };
 }
 
-export async function markCampaignCompletedAction(campaignId: string) {
+// Régénère le message d'un contact spécifique via Mistral.
+export async function regenerateMessageAction(messageId: string) {
+  const userId = await getUserId();
+  const admin = createSupabaseAdmin();
+
+  const { data: msg } = await admin
+    .from("messages_generated")
+    .select("contact_id, campaign_id, channel")
+    .eq("id", messageId)
+    .eq("user_id", userId)
+    .single();
+  if (!msg) return { error: "Message introuvable." };
+
+  const { data: campaign } = await admin
+    .from("campaigns")
+    .select("template_id")
+    .eq("id", msg.campaign_id)
+    .single();
+  if (!campaign?.template_id) return { error: "Template introuvable." };
+
+  const { data: tpl } = await admin
+    .from("templates")
+    .select("body_text, subject")
+    .eq("id", campaign.template_id)
+    .single();
+  if (!tpl) return { error: "Template introuvable." };
+
+  const { data: contact } = await admin
+    .from("contacts")
+    .select("first_name, last_name, email, linkedin_url, company_name, role, industry, country, custom_fields")
+    .eq("id", msg.contact_id)
+    .single();
+  if (!contact) return { error: "Contact introuvable." };
+
+  const mistralCreds = await getDecryptedCredential<MistralConfig>(userId, "mistral");
+  if (!mistralCreds?.api_key) return { error: "Mistral non configuré." };
+
+  const ctx = { ...contact, ...(contact.custom_fields ?? {}) };
+  try {
+    const newBody = await renderTemplateWithMistral(tpl.body_text, ctx, mistralCreds);
+    await admin
+      .from("messages_generated")
+      .update({ body_rendered: newBody, ai_refined: true })
+      .eq("id", messageId);
+    return { ok: true, newBody };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+// Sauvegarde une édition manuelle du corps du message.
+export async function updateMessageBodyAction(messageId: string, newBody: string) {
+  const userId = await getUserId();
+  const admin = createSupabaseAdmin();
+  const { error } = await admin
+    .from("messages_generated")
+    .update({ body_rendered: newBody.trim(), ai_refined: false })
+    .eq("id", messageId)
+    .eq("user_id", userId);
+  if (error) return { error: error.message };
+  return { ok: true };
+}
+
+// Arrête une campagne en cours ou en révision.
+export async function stopCampaignAction(campaignId: string) {
   const userId = await getUserId();
   const admin = createSupabaseAdmin();
   await admin
     .from("campaigns")
-    .update({ status: "completed", completed_at: new Date().toISOString() })
+    .update({ status: "cancelled", completed_at: new Date().toISOString() })
     .eq("id", campaignId)
     .eq("user_id", userId);
+  await admin
+    .from("messages_generated")
+    .update({ status: "skipped", error_message: "Campagne arrêtée manuellement" })
+    .eq("campaign_id", campaignId)
+    .eq("status", "pending");
   revalidatePath("/campaigns");
   return { ok: true };
 }
 
 async function processCampaignSend(userId: string, campaignId: string) {
+  console.log("[Campaign] processCampaignSend START", { userId, campaignId });
   const admin = createSupabaseAdmin();
   const { data: campaign } = await admin
     .from("campaigns")
     .select("channel, throttle_seconds")
     .eq("id", campaignId)
     .single();
-  if (!campaign) return;
+  if (!campaign) { console.error("[Campaign] campaign not found", campaignId); return; }
+  console.log("[Campaign] channel=%s throttle=%ds", campaign.channel, campaign.throttle_seconds);
 
   const { data: pending } = await admin
     .from("messages_generated")
     .select("id, contact_id, subject, body_rendered, channel")
     .eq("campaign_id", campaignId)
     .eq("status", "pending");
-  if (!pending?.length) return;
+  if (!pending?.length) { console.log("[Campaign] no pending messages"); return; }
+  console.log("[Campaign] pending messages:", pending.length);
 
   const { data: contactRows } = await admin
     .from("contacts")
@@ -225,80 +307,78 @@ async function processCampaignSend(userId: string, campaignId: string) {
 
   if (campaign.channel === "email") {
     const creds = await getDecryptedCredential<SmtpCreds>(userId, "smtp");
-    if (!creds) {
-      await markAllFailed(campaignId, "SMTP non configuré.");
-      return;
-    }
+    if (!creds) { await markAllFailed(campaignId, "SMTP non configuré."); return; }
+    console.log("[Campaign] SMTP host=%s from=%s", creds.host, creds.from_email);
     for (const msg of pending) {
+      if (await isCancelled(campaignId)) { console.log("[Campaign] cancelled, stopping loop"); break; }
       const c = contactsMap.get(msg.contact_id);
       if (!c?.email) {
-        await admin.from("messages_generated").update({
-          status: "skipped", error_message: "Pas d'email",
-        }).eq("id", msg.id);
+        await admin.from("messages_generated").update({ status: "skipped", error_message: "Pas d'email" }).eq("id", msg.id);
         continue;
       }
+      console.log("[Campaign] sending email to", c.email, "msgId=", msg.id);
       try {
         const providerId = await sendViaSmtp(creds, {
           to: c.email,
           subject: msg.subject ?? "",
           text: withUnsubFooter(userId, c.email, msg.body_rendered),
         });
-        await admin.from("messages_generated").update({
-          status: "sent", sent_at: new Date().toISOString(), provider_message_id: providerId,
-        }).eq("id", msg.id);
+        console.log("[Campaign] email sent providerId=", providerId);
+        await admin.from("messages_generated").update({ status: "sent", sent_at: new Date().toISOString(), provider_message_id: providerId }).eq("id", msg.id);
       } catch (e) {
-        await admin.from("messages_generated").update({
-          status: "failed", error_message: (e as Error).message,
-        }).eq("id", msg.id);
+        console.error("[Campaign] email failed msgId=", msg.id, e);
+        await admin.from("messages_generated").update({ status: "failed", error_message: (e as Error).message }).eq("id", msg.id);
       }
       await sleep(campaign.throttle_seconds * 1000);
     }
   } else {
-    // LinkedIn via factory multi-provider (OutX prioritaire, fallback Unipile)
     let sender;
     try {
       sender = await getLinkedinSenderForUser(userId);
+      console.log("[Campaign] LinkedIn provider=", sender.provider);
     } catch (e) {
+      console.error("[Campaign] LinkedIn sender init failed:", e);
       await markAllFailed(campaignId, (e as Error).message);
       return;
     }
     for (const msg of pending) {
+      if (await isCancelled(campaignId)) { console.log("[Campaign] cancelled, stopping loop"); break; }
       const c = contactsMap.get(msg.contact_id);
       if (!c?.linkedin_url) {
-        await admin.from("messages_generated").update({
-          status: "skipped", error_message: "Pas d'URL LinkedIn",
-        }).eq("id", msg.id);
+        await admin.from("messages_generated").update({ status: "skipped", error_message: "Pas d'URL LinkedIn" }).eq("id", msg.id);
         continue;
       }
+      console.log("[Campaign] LinkedIn send channel=%s url=%s msgId=%s", msg.channel, c.linkedin_url, msg.id);
       try {
         const result = msg.channel === "linkedin_connect"
           ? await sender.sendConnectionRequest({ linkedin_url: c.linkedin_url, text: msg.body_rendered })
           : await sender.sendMessage({ linkedin_url: c.linkedin_url, text: msg.body_rendered });
-        await admin.from("messages_generated").update({
-          status: "sent", sent_at: new Date().toISOString(), provider_message_id: result.providerMessageId,
-        }).eq("id", msg.id);
+        console.log("[Campaign] LinkedIn sent providerMsgId=", result.providerMessageId);
+        await admin.from("messages_generated").update({ status: "sent", sent_at: new Date().toISOString(), provider_message_id: result.providerMessageId }).eq("id", msg.id);
       } catch (e) {
-        await admin.from("messages_generated").update({
-          status: "failed", error_message: (e as Error).message,
-        }).eq("id", msg.id);
+        console.error("[Campaign] LinkedIn failed msgId=", msg.id, e);
+        await admin.from("messages_generated").update({ status: "failed", error_message: (e as Error).message }).eq("id", msg.id);
       }
       await sleep(campaign.throttle_seconds * 1000);
     }
   }
 
-  await admin.from("campaigns").update({
-    status: "completed", completed_at: new Date().toISOString(),
-  }).eq("id", campaignId);
+  const { data: check } = await createSupabaseAdmin().from("campaigns").select("status").eq("id", campaignId).single();
+  if (check?.status !== "cancelled") {
+    await admin.from("campaigns").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", campaignId);
+    console.log("[Campaign] processCampaignSend DONE", campaignId);
+  }
+}
+
+async function isCancelled(campaignId: string): Promise<boolean> {
+  const { data } = await createSupabaseAdmin().from("campaigns").select("status").eq("id", campaignId).single();
+  return data?.status === "cancelled";
 }
 
 async function markAllFailed(campaignId: string, reason: string) {
   const admin = createSupabaseAdmin();
-  await admin.from("messages_generated").update({
-    status: "failed", error_message: reason,
-  }).eq("campaign_id", campaignId).eq("status", "pending");
-  await admin.from("campaigns").update({
-    status: "completed", completed_at: new Date().toISOString(),
-  }).eq("id", campaignId);
+  await admin.from("messages_generated").update({ status: "failed", error_message: reason }).eq("campaign_id", campaignId).eq("status", "pending");
+  await admin.from("campaigns").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", campaignId);
 }
 
 function sleep(ms: number) {

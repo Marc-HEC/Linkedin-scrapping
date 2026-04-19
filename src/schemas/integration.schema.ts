@@ -27,6 +27,7 @@ export const dropcontactSchema = z.object({
 
 export const outxSchema = z.object({
   api_key: z.string().min(10, "Clé API OutX invalide"),
+  base_url: z.string().url("URL invalide").default("https://api.outx.ai"),
 });
 
 export const apolloSchema = z.object({
