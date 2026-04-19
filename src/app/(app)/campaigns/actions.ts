@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { renderTemplate } from "@/lib/templating/render";
-import { getDecryptedCredential } from "../integrations/actions";
+import { getDecryptedCredential, hasActiveLinkedinIntegration } from "../integrations/actions";
 import { sendViaSmtp, type SmtpCreds } from "@/lib/senders/email";
 import { getLinkedinSenderForUser } from "@/lib/senders/linkedin";
 import { refineMessage, type MistralCreds } from "@/lib/ai/mistral";
@@ -82,14 +82,11 @@ export async function launchCampaignAction(input: LaunchInput) {
     .single();
   if (!tpl) return { error: "Template introuvable." };
 
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("linkedin_mode")
-    .eq("id", userId)
-    .single();
-  const linkedinMode = (profile?.linkedin_mode ?? "manual") as "manual" | "unipile";
   const isLinkedIn = tpl.channel === "linkedin_connect" || tpl.channel === "linkedin_message";
-  const isManualLinkedIn = isLinkedIn && linkedinMode === "manual";
+  // Détection dynamique : si le user a une intégration LinkedIn active (OutX ou Unipile),
+  // on envoie automatiquement. Sinon, mode manuel (copier-coller).
+  const hasLinkedin = isLinkedIn ? await hasActiveLinkedinIntegration(userId) : false;
+  const isManualLinkedIn = isLinkedIn && !hasLinkedin;
 
   const contacts = await previewMatchesAction(input.tagsPriority, input.dailyQuota);
   if (contacts.length === 0) return { error: "Aucun contact ne matche ces tags." };
@@ -168,9 +165,14 @@ export async function launchCampaignAction(input: LaunchInput) {
     return { ok: true, campaignId: campaign.id, queued: messages.length, manual: true };
   }
 
-  void processCampaignSend(userId, campaign.id).catch((e) =>
-    console.error("Campaign send error:", e)
-  );
+  // Utilise after() pour garantir que le traitement survit à la réponse du server action.
+  after(async () => {
+    try {
+      await processCampaignSend(userId, campaign.id);
+    } catch (e) {
+      console.error("Campaign send error:", e);
+    }
+  });
 
   revalidatePath("/campaigns");
   return { ok: true, campaignId: campaign.id, queued: messages.length };

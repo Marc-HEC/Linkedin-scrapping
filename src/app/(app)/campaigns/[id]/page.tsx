@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { hasActiveLinkedinIntegration } from "@/app/(app)/integrations/actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CampaignDetailClient } from "./campaign-detail-client";
@@ -27,13 +28,6 @@ export default async function CampaignDetailPage({
     .single();
   if (!campaign) notFound();
 
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("linkedin_mode")
-    .eq("id", user.id)
-    .single();
-  const linkedinMode = (profile?.linkedin_mode ?? "manual") as "manual" | "unipile";
-
   const { data: messages } = await admin
     .from("messages_generated")
     .select("id, contact_id, subject, body_rendered, status, sent_at, error_message")
@@ -54,7 +48,8 @@ export default async function CampaignDetailPage({
   );
 
   const isLinkedIn = campaign.channel === "linkedin_connect" || campaign.channel === "linkedin_message";
-  const isManualMode = isLinkedIn && linkedinMode === "manual";
+  const hasLinkedin = isLinkedIn ? await hasActiveLinkedinIntegration(user.id) : false;
+  const isManualMode = isLinkedIn && !hasLinkedin;
 
   const statusCounts = msgs.reduce<Record<string, number>>((acc, m) => {
     acc[m.status] = (acc[m.status] ?? 0) + 1;
