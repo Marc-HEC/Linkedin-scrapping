@@ -6,10 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import {
   confirmAndSendCampaignAction,
   regenerateMessageAction,
   updateMessageBodyAction,
+  updateMessageSubjectAction,
   stopCampaignAction,
 } from "../actions";
 
@@ -50,6 +52,9 @@ export function CampaignDetailClient({
   const [bodies, setBodies] = useState<Record<string, string>>(
     () => Object.fromEntries(rows.map((r) => [r.id, r.body]))
   );
+  const [subjects, setSubjects] = useState<Record<string, string>>(
+    () => Object.fromEntries(rows.map((r) => [r.id, r.subject ?? ""]))
+  );
   const [regenerating, setRegenerating] = useState<Record<string, boolean>>({});
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -75,13 +80,20 @@ export function CampaignDetailClient({
     await updateMessageBodyAction(rowId, bodies[rowId] ?? "");
   }
 
+  async function handleSubjectBlur(rowId: string) {
+    await updateMessageSubjectAction(rowId, subjects[rowId] ?? "");
+  }
+
   function handleConfirm() {
     startTransition(async () => {
       // Save any pending edits first
       await Promise.all(
         rows
           .filter((r) => r.status === "pending")
-          .map((r) => updateMessageBodyAction(r.id, bodies[r.id] ?? ""))
+          .flatMap((r) => [
+            updateMessageBodyAction(r.id, bodies[r.id] ?? ""),
+            ...(channel === "email" ? [updateMessageSubjectAction(r.id, subjects[r.id] ?? "")] : []),
+          ])
       );
       const res = await confirmAndSendCampaignAction(campaignId);
       if (res.error) { setFeedback(`Erreur : ${res.error}`); return; }
@@ -179,11 +191,21 @@ export function CampaignDetailClient({
                   </div>
                 </div>
 
-                {/* Subject */}
-                {row.subject && (
-                  <div className="text-xs">
-                    <span className="font-medium">Objet :</span> {row.subject}
+                {/* Subject — editable in review mode for email, read-only otherwise */}
+                {channel === "email" && isDraft && row.status === "pending" && (
+                  <div className="mb-2">
+                    <label className="mb-1 block text-xs text-muted-foreground">Objet</label>
+                    <Input
+                      value={subjects[row.id] ?? ""}
+                      onChange={(e) => setSubjects((s) => ({ ...s, [row.id]: e.target.value }))}
+                      onBlur={() => handleSubjectBlur(row.id)}
+                      placeholder="Objet du message"
+                      className="h-8 text-sm"
+                    />
                   </div>
+                )}
+                {channel === "email" && row.status !== "pending" && row.subject && (
+                  <p className="mb-1 text-xs text-muted-foreground">Objet : {row.subject}</p>
                 )}
 
                 {/* Body — editable in review mode, read-only otherwise */}

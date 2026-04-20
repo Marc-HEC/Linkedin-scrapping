@@ -63,6 +63,7 @@ type LaunchInput = {
   tagsPriority: string[];
   dailyQuota: number;
   throttleSeconds: number;
+  excludedContactIds?: string[];
 };
 
 // Étape 1 : génère les messages avec Mistral et crée la campagne en statut "draft".
@@ -84,7 +85,9 @@ export async function launchCampaignAction(input: LaunchInput) {
     .single();
   if (!tpl) return { error: "Template introuvable." };
 
-  const contacts = await previewMatchesAction(input.tagsPriority, input.dailyQuota);
+  const excluded = new Set(input.excludedContactIds ?? []);
+  const contacts = (await previewMatchesAction(input.tagsPriority, input.dailyQuota))
+    .filter((c) => !excluded.has(c.id));
   if (contacts.length === 0) return { error: "Aucun contact ne matche ces tags." };
 
   // Filtre GDPR
@@ -256,6 +259,19 @@ export async function updateMessageBodyAction(messageId: string, newBody: string
   const { error } = await admin
     .from("messages_generated")
     .update({ body_rendered: newBody.trim(), ai_refined: false })
+    .eq("id", messageId)
+    .eq("user_id", userId);
+  if (error) return { error: error.message };
+  return { ok: true };
+}
+
+// Sauvegarde une édition manuelle de l'objet du message.
+export async function updateMessageSubjectAction(messageId: string, newSubject: string) {
+  const userId = await getUserId();
+  const admin = createSupabaseAdmin();
+  const { error } = await admin
+    .from("messages_generated")
+    .update({ subject: newSubject.trim() || null })
     .eq("id", messageId)
     .eq("user_id", userId);
   if (error) return { error: error.message };

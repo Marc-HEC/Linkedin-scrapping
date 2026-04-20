@@ -32,19 +32,32 @@ export function NewCampaignClient({
   const [throttle, setThrottle] = useState(45);
   const [preview, setPreview] = useState<MatchedContact[]>([]);
   const [previewIdx, setPreviewIdx] = useState(0);
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [launching, setLaunching] = useState(false);
   const [, startTransition] = useTransition();
+
+  function toggleContact(id: string) {
+    setExcludedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
 
   const tpl = templates.find((t) => t.id === templateId) ?? null;
 
   // Recalcule l'aperçu contacts à chaque changement de tags (debounced).
   useEffect(() => {
-    if (tagsPriority.length === 0) { setPreview([]); return; }
+    if (tagsPriority.length === 0) { setPreview([]); setExcludedIds(new Set()); return; }
     const timer = setTimeout(() => {
       startTransition(async () => {
         const rows = await previewMatchesAction(tagsPriority, 500);
-        setPreview(rows);
+        const sorted = [...rows].sort(
+          (a, b) => scoreContact(b, tagsPriority) - scoreContact(a, tagsPriority)
+        );
+        setPreview(sorted);
         setPreviewIdx(0);
+        setExcludedIds(new Set());
       });
     }, 250);
     return () => clearTimeout(timer);
@@ -55,7 +68,10 @@ export function NewCampaignClient({
     [availableTags, tagsPriority, tagInput]
   );
 
-  const topContacts = preview.slice(0, 5);
+  const selectedCount = useMemo(
+    () => preview.filter((c) => !excludedIds.has(c.id)).length,
+    [preview, excludedIds]
+  );
   const currentContact = preview[previewIdx];
   const renderedSubject = currentContact && tpl?.subject
     ? renderTemplate(tpl.subject, flatten(currentContact)).output : null;
@@ -88,6 +104,7 @@ export function NewCampaignClient({
       tagsPriority,
       dailyQuota,
       throttleSeconds: throttle,
+      excludedContactIds: [...excludedIds],
     });
     setLaunching(false);
     if (res.error) { alert(res.error); return; }
@@ -231,10 +248,10 @@ export function NewCampaignClient({
 
         <Button
           size="lg"
-          disabled={launching || !name || !tpl || tagsPriority.length === 0 || preview.length === 0}
+          disabled={launching || !name || !tpl || tagsPriority.length === 0 || selectedCount === 0}
           onClick={launch}
         >
-          {launching ? "Lancement…" : `Lancer la campagne (${Math.min(preview.length, dailyQuota)} messages)`}
+          {launching ? "Lancement…" : `Lancer la campagne (${Math.min(selectedCount, dailyQuota)} contacts sélectionnés)`}
         </Button>
       </div>
 
@@ -252,39 +269,57 @@ export function NewCampaignClient({
           </CardContent>
         </Card>
 
-        {topContacts.length > 0 && (
+        {preview.length > 0 && (
           <Card>
-            <CardHeader><CardTitle className="text-base">Top 5 contacts</CardTitle></CardHeader>
-            <CardContent className="space-y-1 text-sm">
-              {topContacts.map((c, i) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setPreviewIdx(i)}
-                  className={`flex w-full items-center justify-between rounded-md px-2 py-1 text-left hover:bg-muted ${
-                    i === previewIdx ? "bg-muted" : ""
-                  }`}
-                >
-                  <div>
-                    <div className="font-medium">
-                      {c.first_name} {c.last_name} {c.company_name ? `· ${c.company_name}` : ""}
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Contacts ciblés</CardTitle>
+                <span className="text-xs text-muted-foreground">
+                  {selectedCount} / {preview.length} sélectionnés
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent className="px-3 pb-3">
+              <div className="max-h-[300px] overflow-y-auto space-y-0.5">
+                {preview.map((c, i) => {
+                  const excluded = excludedIds.has(c.id);
+                  return (
+                    <div
+                      key={c.id}
+                      className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-opacity ${excluded ? "opacity-40" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!excluded}
+                        onChange={() => toggleContact(c.id)}
+                        className="h-3.5 w-3.5 shrink-0 cursor-pointer"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setPreviewIdx(i)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className={`font-medium leading-tight ${excluded ? "line-through" : ""}`}>
+                          {c.first_name} {c.last_name}{c.company_name ? ` · ${c.company_name}` : ""}
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {c.tags.map((t) => (
+                            <span
+                              key={t}
+                              className={`text-[10px] ${
+                                tagsPriority.includes(t) ? "font-semibold text-primary" : "text-muted-foreground"
+                              }`}
+                            >#{t}</span>
+                          ))}
+                        </div>
+                      </button>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        Score: {scoreContact(c, tagsPriority)}
+                      </span>
                     </div>
-                    <div className="flex flex-wrap gap-1">
-                      {c.tags.map((t) => (
-                        <span
-                          key={t}
-                          className={`text-[10px] ${
-                            tagsPriority.includes(t) ? "font-semibold text-primary" : "text-muted-foreground"
-                          }`}
-                        >#{t}</span>
-                      ))}
-                    </div>
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {c.match_count}/{tagsPriority.length}
-                  </span>
-                </button>
-              ))}
+                  );
+                })}
+              </div>
             </CardContent>
           </Card>
         )}
@@ -302,11 +337,11 @@ export function NewCampaignClient({
                   disabled={previewIdx === 0}
                   className="px-2 disabled:opacity-30"
                 >←</button>
-                <span>{previewIdx + 1}/{topContacts.length}</span>
+                <span>{previewIdx + 1}/{preview.length}</span>
                 <button
                   type="button"
-                  onClick={() => setPreviewIdx(Math.min(topContacts.length - 1, previewIdx + 1))}
-                  disabled={previewIdx >= topContacts.length - 1}
+                  onClick={() => setPreviewIdx(Math.min(preview.length - 1, previewIdx + 1))}
+                  disabled={previewIdx >= preview.length - 1}
                   className="px-2 disabled:opacity-30"
                 >→</button>
               </div>
@@ -324,6 +359,13 @@ export function NewCampaignClient({
       </aside>
     </div>
   );
+}
+
+function scoreContact(contact: MatchedContact, tagsPriority: string[]): number {
+  return tagsPriority.reduce((score, tag, idx) => {
+    const hasTag = contact.tags.some((t) => t.toLowerCase() === tag.toLowerCase());
+    return score + (hasTag ? tagsPriority.length - idx : 0);
+  }, 0);
 }
 
 function flatten(c: MatchedContact): Record<string, unknown> {
