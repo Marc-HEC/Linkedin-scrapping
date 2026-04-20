@@ -5,22 +5,35 @@ function base(dsn: string): string {
   return dsn.startsWith("http") ? dsn : `https://${dsn}/api/v1`;
 }
 
+const POLL_INTERVAL_MS = 3000;
+const POLL_MAX_ATTEMPTS = 20;
+
 export async function searchProfiles(
   params: LinkedinSearchParams,
   apiKey: string,
   dsn: string,
   accountId: string
 ): Promise<LinkedinProfileResult[]> {
-  const url = new URL(`${base(dsn)}/users`);
-  url.searchParams.set("account_id", accountId);
-  url.searchParams.set("keywords", params.keywords);
-  if (params.limit)   url.searchParams.set("limit", String(params.limit));
-  if (params.title)   url.searchParams.set("title_filter", params.title);
-  if (params.company) url.searchParams.set("company_filter", params.company);
+  // Correct Unipile endpoint: POST /api/v1/linkedin/search?account_id=...
+  const url = `${base(dsn)}/linkedin/search?account_id=${accountId}`;
 
-  const res = await fetch(url.toString(), {
-    headers: { "X-API-KEY": apiKey },
+  const body: Record<string, unknown> = {
+    api: "classic",
+    category: "people",
+  };
+  if (params.keywords) body.keywords = params.keywords;
+  if (params.title)    body.title    = params.title;
+  if (params.company)  body.company  = { include: [params.company] };
+  if (params.location) body.location = params.location;
+  if (params.limit)    body.count    = params.limit;
+
+  console.log(`[Unipile] POST ${url} keywords=${params.keywords}`);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
+
   if (!res.ok) throw new Error(`Unipile search ${res.status}: ${await res.text()}`);
 
   const json = (await res.json()) as { items?: RawProfile[] } | RawProfile[];
@@ -28,7 +41,7 @@ export async function searchProfiles(
 
   let results = rows.map(normalize).filter((p) => !!p.linkedin_url);
 
-  // Unipile has no native location filter — apply client-side if provided.
+  // Unipile has no native location filter — apply client-side if provided
   if (params.location) {
     const loc = params.location.toLowerCase();
     results = results.filter((p) => p.location?.toLowerCase().includes(loc));
