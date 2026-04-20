@@ -4,7 +4,14 @@ import { NewCampaignClient } from "./new-campaign-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewCampaignPage() {
+export default async function NewCampaignPage(props: {
+  searchParams: Promise<{ tags?: string }>;
+}) {
+  const searchParams = await props.searchParams;
+  const initialTags = searchParams.tags
+    ? searchParams.tags.split(",").map((t) => t.trim()).filter(Boolean)
+    : [];
+
   const sb = await createSupabaseServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return null;
@@ -31,6 +38,7 @@ export default async function NewCampaignPage() {
       <NewCampaignClient
         templates={(templates ?? []) as TemplateLite[]}
         availableTags={((tags ?? []) as Array<{ tag: string; usage_count: number }>).map((t) => t.tag)}
+        initialTags={initialTags}
       />
     </div>
   );

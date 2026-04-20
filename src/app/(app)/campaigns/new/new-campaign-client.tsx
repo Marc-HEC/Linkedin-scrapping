@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,22 +19,33 @@ const CHANNEL_LABEL: Record<TemplateLite["channel"], string> = {
 export function NewCampaignClient({
   templates,
   availableTags,
+  initialTags = [],
 }: {
   templates: TemplateLite[];
   availableTags: string[];
+  initialTags?: string[];
 }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [templateId, setTemplateId] = useState<string>(templates[0]?.id ?? "");
-  const [tagsPriority, setTagsPriority] = useState<string[]>([]);
+  const [tagsPriority, setTagsPriority] = useState<string[]>(initialTags);
   const [tagInput, setTagInput] = useState("");
   const [dailyQuota, setDailyQuota] = useState(30);
   const [throttle, setThrottle] = useState(45);
   const [preview, setPreview] = useState<MatchedContact[]>([]);
   const [previewIdx, setPreviewIdx] = useState(0);
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+  const [tagHighlight, setTagHighlight] = useState(-1);
+  const tagSuggestionsRef = useRef<HTMLDivElement>(null);
   const [launching, setLaunching] = useState(false);
   const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (tagHighlight >= 0 && tagSuggestionsRef.current) {
+      const item = tagSuggestionsRef.current.children[tagHighlight] as HTMLElement;
+      item?.scrollIntoView({ block: "nearest" });
+    }
+  }, [tagHighlight]);
 
   function toggleContact(id: string) {
     setExcludedIds((prev) => {
@@ -196,19 +207,24 @@ export function NewCampaignClient({
               <Input
                 placeholder="Ajouter un tag (ex: CTO, SaaS, France)…"
                 value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
+                autoComplete="off"
+                onChange={(e) => { setTagInput(e.target.value); setTagHighlight(-1); }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); addTag(tagInput); }
+                  if (e.key === "ArrowDown") { e.preventDefault(); setTagHighlight((i) => Math.min(i + 1, suggestions.length - 1)); }
+                  else if (e.key === "ArrowUp") { e.preventDefault(); setTagHighlight((i) => Math.max(i - 1, 0)); }
+                  else if (e.key === "Enter") { e.preventDefault(); if (tagHighlight >= 0) { addTag(suggestions[tagHighlight]); setTagHighlight(-1); } else addTag(tagInput); }
+                  else if (e.key === "Escape") { setTagInput(""); setTagHighlight(-1); }
                 }}
               />
               {tagInput && suggestions.length > 0 && (
-                <div className="absolute left-0 top-full z-10 mt-1 w-full rounded-md border bg-background shadow">
-                  {suggestions.map((s) => (
+                <div ref={tagSuggestionsRef} className="absolute left-0 top-full z-10 mt-1 w-full rounded-md border bg-background shadow">
+                  {suggestions.map((s, i) => (
                     <button
                       key={s}
                       type="button"
-                      onClick={() => addTag(s)}
-                      className="block w-full px-3 py-1.5 text-left text-sm hover:bg-muted"
+                      onClick={() => { addTag(s); setTagHighlight(-1); }}
+                      onMouseEnter={() => setTagHighlight(i)}
+                      className={`block w-full px-3 py-1.5 text-left text-sm ${i === tagHighlight ? "bg-primary/10 text-primary font-medium" : "hover:bg-muted"}`}
                     >{s}</button>
                   ))}
                 </div>

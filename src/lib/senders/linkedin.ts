@@ -141,8 +141,10 @@ class UnipileLinkedinSender implements LinkedinSender {
     return { providerMessageId: id };
   }
 
-  // Unipile n'expose pas de recherche profil stable via API partenaire :
-  // on laisse `searchProfiles` undefined pour que la factory puisse router vers OutX.
+  async searchProfiles(params: LinkedinSearchParams): Promise<LinkedinProfileResult[]> {
+    const { searchProfiles } = await import("@/lib/clients/unipile");
+    return searchProfiles(params, this.creds.api_key, this.creds.dsn, this.creds.account_id);
+  }
 }
 
 // ============================================================
@@ -212,9 +214,17 @@ class FallbackLinkedinSender implements LinkedinSender {
   }
 
   async searchProfiles(params: LinkedinSearchParams): Promise<LinkedinProfileResult[]> {
-    const fn = this.primary.searchProfiles?.bind(this.primary) ?? this.fallback.searchProfiles?.bind(this.fallback);
-    if (!fn) throw new Error("searchProfiles not available on either provider");
-    return fn(params);
+    if (this.primary.searchProfiles) {
+      try {
+        return await this.primary.searchProfiles(params);
+      } catch (e) {
+        console.log(`[LinkedIn] primary search (${this.primary.provider}) failed: ${(e as Error).message}, trying fallback`);
+      }
+    }
+    if (this.fallback.searchProfiles) {
+      return this.fallback.searchProfiles(params);
+    }
+    throw new Error("searchProfiles not available on either provider");
   }
 }
 
@@ -237,7 +247,7 @@ export async function getLinkedinSenderForUser(userId: string): Promise<Linkedin
 
   let outxSender: OutxLinkedinSender | null = null;
   if (outxCreds?.api_key) {
-    const baseUrl = outxCreds.base_url ?? process.env.OUTX_API_BASE_URL;
+    const baseUrl = outxCreds.base_url ?? process.env.OUTX_API_BASE_URL ?? "https://api.outx.ai";
     if (!baseUrl) throw new Error("OUTX_API_BASE_URL is not set in environment");
     outxSender = new OutxLinkedinSender(outxCreds.api_key, baseUrl);
   }

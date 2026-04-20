@@ -1,12 +1,12 @@
-# Graph Report - D:\TP info\outreach-app  (2026-04-19)
+# Graph Report - D:\TP info\outreach-app  (2026-04-20)
 
 ## Corpus Check
-- 46 files · ~23,346 words
+- 57 files · ~37,825 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 132 nodes · 195 edges · 30 communities detected
-- Extraction: 69% EXTRACTED · 31% INFERRED · 0% AMBIGUOUS · INFERRED: 61 edges (avg confidence: 0.8)
+- 217 nodes · 367 edges · 35 communities detected
+- Extraction: 70% EXTRACTED · 30% INFERRED · 0% AMBIGUOUS · INFERRED: 109 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
@@ -40,83 +40,88 @@
 - [[_COMMUNITY_Community 27|Community 27]]
 - [[_COMMUNITY_Community 28|Community 28]]
 - [[_COMMUNITY_Community 29|Community 29]]
+- [[_COMMUNITY_Community 30|Community 30]]
+- [[_COMMUNITY_Community 31|Community 31]]
+- [[_COMMUNITY_Community 32|Community 32]]
+- [[_COMMUNITY_Community 33|Community 33]]
+- [[_COMMUNITY_Community 34|Community 34]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `createSupabaseAdmin()` - 25 edges
-2. `getUserId()` - 15 edges
-3. `createSupabaseServer()` - 10 edges
-4. `getAuthenticatedUser()` - 8 edges
-5. `saveIntegration()` - 8 edges
-6. `processCampaignSend()` - 7 edges
-7. `saveSMTPAction()` - 7 edges
-8. `async()` - 7 edges
-9. `launchCampaignAction()` - 6 edges
-10. `saveMistralAction()` - 6 edges
+1. `createSupabaseAdmin()` - 42 edges
+2. `getUserId()` - 32 edges
+3. `processCampaignSend()` - 11 edges
+4. `createSupabaseServer()` - 11 edges
+5. `getAuthenticatedUser()` - 10 edges
+6. `saveIntegration()` - 10 edges
+7. `async()` - 9 edges
+8. `saveSMTPAction()` - 7 edges
+9. `last4()` - 7 edges
+10. `searchAndImportLinkedinContactsAction()` - 6 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `launchCampaignAction()` --calls--> `launch()`  [INFERRED]
-  outreach-app\src\app\(app)\campaigns\actions.ts → outreach-app\src\app\(app)\campaigns\new\new-campaign-client.tsx
+  D:\TP info\outreach-app\src\app\(app)\campaigns\actions.ts → D:\TP info\outreach-app\src\app\(app)\campaigns\new\new-campaign-client.tsx
+- `saveTemplateAction()` --calls--> `submit()`  [INFERRED]
+  D:\TP info\outreach-app\src\app\(app)\templates\actions.ts → D:\TP info\outreach-app\src\app\(app)\templates\templates-client.tsx
 - `AppLayout()` --calls--> `createSupabaseServer()`  [INFERRED]
   outreach-app\src\app\(app)\layout.tsx → outreach-app\src\lib\supabase\server.ts
+- `withUnsubFooter()` --calls--> `makeUnsubscribeToken()`  [INFERRED]
+  D:\TP info\outreach-app\src\app\(app)\campaigns\actions.ts → D:\TP info\outreach-app\src\lib\crypto\encrypt.ts
 - `getUserId()` --calls--> `createSupabaseServer()`  [INFERRED]
-  outreach-app\src\app\(app)\templates\actions.ts → outreach-app\src\lib\supabase\server.ts
-- `processCampaignSend()` --calls--> `sendViaSmtp()`  [INFERRED]
-  outreach-app\src\app\(app)\campaigns\actions.ts → outreach-app\src\lib\senders\email.ts
-- `processCampaignSend()` --calls--> `sendViaUnipile()`  [INFERRED]
-  outreach-app\src\app\(app)\campaigns\actions.ts → outreach-app\src\lib\senders\linkedin.ts
+  D:\TP info\outreach-app\src\app\(app)\templates\actions.ts → outreach-app\src\lib\supabase\server.ts
 
 ## Communities
 
 ### Community 0 - "Community 0"
-Cohesion: 0.12
-Nodes (12): completeOnboarding(), saveProfileStep(), saveSmtpOnboarding(), AppLayout(), handleFinish(), handleProfileSubmit(), handleSmtpSubmit(), CampaignDetailPage() (+4 more)
+Cohesion: 0.13
+Nodes (26): addSuppressionAction(), appUrl(), confirmAndSendCampaignAction(), createSegmentAction(), deleteSegmentAction(), deleteTemplateAction(), getContactsProvidersStatusAction(), getSegmentsAction() (+18 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.18
-Nodes (13): cleanOptional(), createContactAction(), deleteContactAction(), deleteTemplateAction(), getUserId(), importContactsCsvAction(), listUserTagsAction(), parseCSV() (+5 more)
+Cohesion: 0.11
+Nodes (22): apolloSearchAndImportContactsAction(), cleanOptional(), createContactAction(), deleteContactAction(), enrichMissingEmailsWithDropcontactAction(), importContactsCsvAction(), listUserTagsAction(), parseCSV() (+14 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.27
-Nodes (15): deleteIntegrationAction(), getAuthenticatedUser(), getDecryptedCredential(), getIntegrationsStatusAction(), getUserDek(), saveDropcontactAction(), saveIntegration(), saveMistralAction() (+7 more)
+Cohesion: 0.12
+Nodes (12): completeOnboarding(), saveProfileStep(), saveSmtpOnboarding(), AppLayout(), handleFinish(), handleProfileSubmit(), handleSmtpSubmit(), GdprPage() (+4 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.3
-Nodes (9): launchCampaignAction(), markAllFailed(), markCampaignCompletedAction(), markMessageSentAction(), previewMatchesAction(), processCampaignSend(), sleep(), createSupabaseAdmin() (+1 more)
+Cohesion: 0.15
+Nodes (7): extractLinkedInSlug(), FallbackLinkedinSender, OutxLinkedinSender, sendViaUnipile(), unipileBase(), UnipileLinkedinSender, unipileResolveProviderId()
 
 ### Community 4 - "Community 4"
-Cohesion: 0.38
-Nodes (8): signUpAction(), decryptBuffer(), decryptWithDek(), encryptBuffer(), encryptWithDek(), generateEncryptedDek(), masterKey(), unpackDek()
+Cohesion: 0.27
+Nodes (17): deleteIntegrationAction(), getAuthenticatedUser(), getDecryptedCredential(), getIntegrationsStatusAction(), getUserDek(), saveApolloAction(), saveDropcontactAction(), saveIntegration() (+9 more)
 
 ### Community 5 - "Community 5"
-Cohesion: 0.25
-Nodes (5): saveTemplateAction(), extractVariables(), pickValue(), slug(), submit()
+Cohesion: 0.13
+Nodes (11): normHeader(), regenerateMessageAction(), handleBodyBlur(), handleRegenerate(), handleSubjectBlur(), pickValue(), renderTemplateWithMistral(), slug() (+3 more)
 
 ### Community 6 - "Community 6"
-Cohesion: 0.33
-Nodes (3): createSupabaseBrowser(), refresh(), handleLogout()
+Cohesion: 0.27
+Nodes (12): signUpAction(), b64urlDecode(), b64urlEncode(), decryptBuffer(), decryptWithDek(), encryptBuffer(), encryptWithDek(), generateEncryptedDek() (+4 more)
 
 ### Community 7 - "Community 7"
-Cohesion: 0.4
-Nodes (1): launch()
+Cohesion: 0.17
+Nodes (6): createSupabaseBrowser(), handleAdd(), refresh(), onSaved(), save(), handleLogout()
 
 ### Community 8 - "Community 8"
-Cohesion: 0.8
-Nodes (4): base(), extractLinkedInSlug(), resolveProviderId(), sendViaUnipile()
+Cohesion: 0.51
+Nodes (8): extractSlug(), fetchProfileUrn(), headers(), norm(), searchProfiles(), sendConnectionRequest(), sendMessage(), sleep()
 
 ### Community 9 - "Community 9"
-Cohesion: 0.67
-Nodes (0): 
+Cohesion: 0.33
+Nodes (1): launch()
 
 ### Community 10 - "Community 10"
-Cohesion: 1.0
-Nodes (0): 
+Cohesion: 0.67
+Nodes (2): base(), searchPeople()
 
 ### Community 11 - "Community 11"
-Cohesion: 1.0
-Nodes (0): 
+Cohesion: 0.67
+Nodes (1): submit()
 
 ### Community 12 - "Community 12"
-Cohesion: 1.0
+Cohesion: 0.67
 Nodes (0): 
 
 ### Community 13 - "Community 13"
@@ -187,62 +192,86 @@ Nodes (0):
 Cohesion: 1.0
 Nodes (0): 
 
+### Community 30 - "Community 30"
+Cohesion: 1.0
+Nodes (0): 
+
+### Community 31 - "Community 31"
+Cohesion: 1.0
+Nodes (0): 
+
+### Community 32 - "Community 32"
+Cohesion: 1.0
+Nodes (0): 
+
+### Community 33 - "Community 33"
+Cohesion: 1.0
+Nodes (0): 
+
+### Community 34 - "Community 34"
+Cohesion: 1.0
+Nodes (0): 
+
 ## Knowledge Gaps
-- **Thin community `Community 10`** (2 nodes): `middleware()`, `middleware.ts`
+- **Thin community `Community 13`** (2 nodes): `middleware()`, `middleware.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 11`** (2 nodes): `RootLayout()`, `layout.tsx`
+- **Thin community `Community 14`** (2 nodes): `RootLayout()`, `layout.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 12`** (2 nodes): `page.tsx`, `HomePage()`
+- **Thin community `Community 15`** (2 nodes): `page.tsx`, `HomePage()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 13`** (2 nodes): `CampaignDetailClient()`, `campaign-detail-client.tsx`
+- **Thin community `Community 16`** (2 nodes): `page.tsx`, `SignupPage()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 14`** (2 nodes): `page.tsx`, `SignupPage()`
+- **Thin community `Community 17`** (2 nodes): `Badge()`, `badge.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 15`** (2 nodes): `Badge()`, `badge.tsx`
+- **Thin community `Community 18`** (2 nodes): `utils.ts`, `cn()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 16`** (2 nodes): `utils.ts`, `cn()`
+- **Thin community `Community 19`** (2 nodes): `mistral.ts`, `refineMessage()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 17`** (1 nodes): `next-env.d.ts`
+- **Thin community `Community 20`** (2 nodes): `dropcontact.ts`, `enrichBatch()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 18`** (1 nodes): `next.config.mjs`
+- **Thin community `Community 21`** (1 nodes): `next-env.d.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 19`** (1 nodes): `postcss.config.mjs`
+- **Thin community `Community 22`** (1 nodes): `next.config.mjs`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 20`** (1 nodes): `tailwind.config.ts`
+- **Thin community `Community 23`** (1 nodes): `postcss.config.mjs`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 21`** (1 nodes): `page.tsx`
+- **Thin community `Community 24`** (1 nodes): `tailwind.config.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 22`** (1 nodes): `page.tsx`
+- **Thin community `Community 25`** (1 nodes): `page.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 23`** (1 nodes): `page.tsx`
+- **Thin community `Community 26`** (1 nodes): `page.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 24`** (1 nodes): `button.tsx`
+- **Thin community `Community 27`** (1 nodes): `page.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 25`** (1 nodes): `card.tsx`
+- **Thin community `Community 28`** (1 nodes): `page.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 26`** (1 nodes): `input.tsx`
+- **Thin community `Community 29`** (1 nodes): `button.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 27`** (1 nodes): `label.tsx`
+- **Thin community `Community 30`** (1 nodes): `card.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 28`** (1 nodes): `textarea.tsx`
+- **Thin community `Community 31`** (1 nodes): `input.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 29`** (1 nodes): `integration.schema.ts`
+- **Thin community `Community 32`** (1 nodes): `label.tsx`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 33`** (1 nodes): `textarea.tsx`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 34`** (1 nodes): `integration.schema.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `createSupabaseAdmin()` connect `Community 3` to `Community 0`, `Community 1`, `Community 2`, `Community 4`, `Community 5`?**
-  _High betweenness centrality (0.369) - this node is a cross-community bridge._
-- **Why does `saveTemplateAction()` connect `Community 5` to `Community 1`, `Community 3`?**
-  _High betweenness centrality (0.092) - this node is a cross-community bridge._
-- **Why does `processCampaignSend()` connect `Community 3` to `Community 8`?**
-  _High betweenness centrality (0.087) - this node is a cross-community bridge._
-- **Are the 24 inferred relationships involving `createSupabaseAdmin()` (e.g. with `previewMatchesAction()` and `launchCampaignAction()`) actually correct?**
-  _`createSupabaseAdmin()` has 24 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 9 inferred relationships involving `createSupabaseServer()` (e.g. with `AppLayout()` and `getUserId()`) actually correct?**
-  _`createSupabaseServer()` has 9 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 2 inferred relationships involving `saveIntegration()` (e.g. with `encryptWithDek()` and `createSupabaseAdmin()`) actually correct?**
-  _`saveIntegration()` has 2 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `createSupabaseAdmin()` connect `Community 0` to `Community 1`, `Community 2`, `Community 4`, `Community 5`, `Community 6`?**
+  _High betweenness centrality (0.335) - this node is a cross-community bridge._
+- **Why does `getUserId()` connect `Community 0` to `Community 1`, `Community 2`, `Community 5`?**
+  _High betweenness centrality (0.111) - this node is a cross-community bridge._
+- **Why does `processCampaignSend()` connect `Community 0` to `Community 1`, `Community 3`?**
+  _High betweenness centrality (0.095) - this node is a cross-community bridge._
+- **Are the 41 inferred relationships involving `createSupabaseAdmin()` (e.g. with `previewMatchesAction()` and `launchCampaignAction()`) actually correct?**
+  _`createSupabaseAdmin()` has 41 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 6 inferred relationships involving `processCampaignSend()` (e.g. with `createSupabaseAdmin()` and `sendViaSmtp()`) actually correct?**
+  _`processCampaignSend()` has 6 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 10 inferred relationships involving `createSupabaseServer()` (e.g. with `AppLayout()` and `getUserId()`) actually correct?**
+  _`createSupabaseServer()` has 10 INFERRED edges - model-reasoned connections that need verification._
 - **Should `Community 0` be split into smaller, more focused modules?**
-  _Cohesion score 0.12 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.13 - nodes in this community are weakly interconnected._

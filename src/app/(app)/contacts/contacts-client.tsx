@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,10 +8,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   createContactAction,
+  updateContactAction,
   updateContactTagsAction,
   deleteContactAction,
   importContactsCsvAction,
   searchAndImportLinkedinContactsAction,
+  searchAndImportWithUnipileAction,
   apolloSearchAndImportContactsAction,
   enrichMissingEmailsWithDropcontactAction,
 } from "./actions";
@@ -19,6 +21,7 @@ import {
 type Providers = {
   linkedin: boolean;
   linkedinSearch: boolean;
+  unipileSearch: boolean;
   apollo: boolean;
   dropcontact: boolean;
 };
@@ -49,6 +52,7 @@ export function ContactsClient({
   const [csvText, setCsvText] = useState("");
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [showLinkedIn, setShowLinkedIn] = useState(false);
+  const [showUnipile, setShowUnipile] = useState(false);
   const [showApollo, setShowApollo] = useState(false);
   const [searchMsg, setSearchMsg] = useState<string | null>(null);
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
@@ -56,6 +60,13 @@ export function ContactsClient({
   async function handleLinkedinSearch(fd: FormData) {
     setSearchMsg("Recherche en cours…");
     const res = await searchAndImportLinkedinContactsAction(fd);
+    if (res.error) setSearchMsg(`Erreur : ${res.error}`);
+    else setSearchMsg(`${res.imported} importé(s), ${res.skipped ?? 0} doublon(s).`);
+  }
+
+  async function handleUnipileSearch(fd: FormData) {
+    setSearchMsg("Recherche Unipile en cours…");
+    const res = await searchAndImportWithUnipileAction(fd);
     if (res.error) setSearchMsg(`Erreur : ${res.error}`);
     else setSearchMsg(`${res.imported} importé(s), ${res.skipped ?? 0} doublon(s).`);
   }
@@ -99,6 +110,11 @@ export function ContactsClient({
         {providers.linkedinSearch && (
           <Button variant="outline" onClick={() => { setShowLinkedIn((v) => !v); setSearchMsg(null); }}>
             Rechercher sur LinkedIn
+          </Button>
+        )}
+        {providers.unipileSearch && (
+          <Button variant="outline" onClick={() => { setShowUnipile((v) => !v); setSearchMsg(null); }}>
+            Rechercher via Unipile
           </Button>
         )}
         {providers.apollo && (
@@ -197,6 +213,31 @@ export function ContactsClient({
         </Card>
       )}
 
+      {showUnipile && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Recherche LinkedIn (via Unipile)</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Recherche via ton compte LinkedIn connecté dans Unipile. Les doublons par URL sont ignorés.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form action={(fd) => startTransition(() => handleUnipileSearch(fd))} className="grid grid-cols-2 gap-3">
+              <Input name="keywords" placeholder="Mots-clés (ex: CTO SaaS Paris)" required className="col-span-2" />
+              <Input name="title" placeholder="Titre (optionnel)" />
+              <Input name="company" placeholder="Entreprise (optionnel)" />
+              <Input name="location" placeholder="Localisation (optionnel)" />
+              <Input name="limit" type="number" min={1} max={100} placeholder="Limite" defaultValue="25" />
+              <div className="col-span-2 flex gap-2 items-center">
+                <Button type="submit" disabled={isPending}>Rechercher</Button>
+                <Button type="button" variant="ghost" onClick={() => setShowUnipile(false)}>Fermer</Button>
+                {searchMsg && <span className="text-sm text-muted-foreground">{searchMsg}</span>}
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
       {showApollo && (
         <Card>
           <CardHeader>
@@ -261,6 +302,39 @@ function ContactRow({ contact, knownTags }: { contact: Contact; knownTags: strin
   const [tags, setTags] = useState<string[]>(contact.tags ?? []);
   const [input, setInput] = useState("");
   const [editing, setEditing] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  const [editingFields, setEditingFields] = useState(false);
+  const [firstName, setFirstName] = useState(contact.first_name ?? "");
+  const [lastName, setLastName] = useState(contact.last_name ?? "");
+  const [email, setEmail] = useState(contact.email ?? "");
+  const [linkedinUrl, setLinkedinUrl] = useState(contact.linkedin_url ?? "");
+  const [companyName, setCompanyName] = useState(contact.company_name ?? "");
+  const [role, setRole] = useState(contact.role ?? "");
+  const [saving, setSaving] = useState(false);
+
+  async function saveFields() {
+    setSaving(true);
+    const res = await updateContactAction(contact.id, {
+      first_name: firstName || null,
+      last_name: lastName || null,
+      email: email || null,
+      linkedin_url: linkedinUrl || null,
+      company_name: companyName || null,
+      role: role || null,
+    });
+    setSaving(false);
+    if (res.error) { alert(res.error); return; }
+    setEditingFields(false);
+  }
+
+  useEffect(() => {
+    if (highlightedIndex >= 0 && suggestionsRef.current) {
+      const item = suggestionsRef.current.children[highlightedIndex] as HTMLElement;
+      item?.scrollIntoView({ block: "nearest" });
+    }
+  }, [highlightedIndex]);
 
   async function commit(next: string[]) {
     setTags(next);
@@ -273,22 +347,23 @@ function ContactRow({ contact, knownTags }: { contact: Contact; knownTags: strin
     setInput("");
   }
 
-  const name = [contact.first_name, contact.last_name].filter(Boolean).join(" ") || "—";
+  const name = [firstName, lastName].filter(Boolean).join(" ") || "—";
   const suggestions = knownTags.filter(
     (t) => !tags.includes(t) && t.toLowerCase().includes(input.toLowerCase())
   ).slice(0, 5);
 
   return (
+    <>
     <tr className="border-b last:border-0 align-top">
       <td className="px-4 py-3">
         <div className="font-medium">{name}</div>
         <div className="text-xs text-muted-foreground">
-          {contact.email || contact.linkedin_url || "—"}
+          {email || linkedinUrl || "—"}
         </div>
       </td>
       <td className="px-4 py-3">
-        <div>{contact.company_name || "—"}</div>
-        <div className="text-xs text-muted-foreground">{contact.role || ""}</div>
+        <div>{companyName || "—"}</div>
+        <div className="text-xs text-muted-foreground">{role || ""}</div>
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap items-center gap-1">
@@ -306,24 +381,28 @@ function ContactRow({ contact, knownTags }: { contact: Contact; knownTags: strin
             <div className="relative">
               <input
                 autoFocus
+                autoComplete="off"
                 className="h-7 rounded-md border px-2 text-xs"
                 placeholder="tag…"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => { setInput(e.target.value); setHighlightedIndex(-1); }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); addTag(input); }
-                  if (e.key === "Escape") { setEditing(false); setInput(""); }
+                  if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); setHighlightedIndex((i) => Math.min(i + 1, suggestions.length - 1)); }
+                  else if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); setHighlightedIndex((i) => Math.max(i - 1, 0)); }
+                  else if (e.key === "Enter") { e.preventDefault(); if (highlightedIndex >= 0) { addTag(suggestions[highlightedIndex]); setHighlightedIndex(-1); } else addTag(input); }
+                  else if (e.key === "Escape") { setEditing(false); setInput(""); setHighlightedIndex(-1); }
                 }}
-                onBlur={() => setTimeout(() => setEditing(false), 150)}
+                onBlur={() => setTimeout(() => { setEditing(false); setHighlightedIndex(-1); }, 150)}
               />
               {input && suggestions.length > 0 && (
-                <div className="absolute left-0 top-full z-10 mt-1 w-40 rounded-md border bg-background shadow">
-                  {suggestions.map((s) => (
+                <div ref={suggestionsRef} className="absolute left-0 top-full z-10 mt-1 w-40 rounded-md border bg-background shadow">
+                  {suggestions.map((s, i) => (
                     <button
                       key={s}
                       type="button"
-                      className="block w-full px-2 py-1 text-left text-xs hover:bg-muted"
-                      onMouseDown={(e) => { e.preventDefault(); addTag(s); }}
+                      className={`block w-full px-2 py-1 text-left text-xs ${i === highlightedIndex ? "bg-primary/10 text-primary font-medium" : "hover:bg-muted"}`}
+                      onMouseEnter={() => setHighlightedIndex(i)}
+                      onMouseDown={(e) => { e.preventDefault(); addTag(s); setHighlightedIndex(-1); }}
                     >
                       {s}
                     </button>
@@ -343,15 +422,42 @@ function ContactRow({ contact, knownTags }: { contact: Contact; knownTags: strin
         </div>
       </td>
       <td className="px-4 py-3">
-        <button
-          type="button"
-          onClick={() => {
-            if (confirm("Supprimer ce contact ?")) deleteContactAction(contact.id);
-          }}
-          className="text-muted-foreground hover:text-destructive"
-          title="Supprimer"
-        >×</button>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => setEditingFields((v) => !v)}
+            className="text-xs text-muted-foreground hover:text-foreground"
+            title="Éditer"
+          >✎</button>
+          <button
+            type="button"
+            onClick={() => {
+              if (confirm("Supprimer ce contact ?")) deleteContactAction(contact.id);
+            }}
+            className="text-muted-foreground hover:text-destructive"
+            title="Supprimer"
+          >×</button>
+        </div>
       </td>
     </tr>
+    {editingFields && (
+      <tr className="border-b bg-muted/20">
+        <td colSpan={4} className="px-4 py-3">
+          <div className="grid grid-cols-3 gap-2">
+            <Input placeholder="Prénom" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+            <Input placeholder="Nom" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            <Input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Input placeholder="Entreprise" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+            <Input placeholder="Rôle" value={role} onChange={(e) => setRole(e.target.value)} />
+            <Input placeholder="URL LinkedIn" value={linkedinUrl} onChange={(e) => setLinkedinUrl(e.target.value)} />
+          </div>
+          <div className="mt-2 flex gap-2">
+            <Button size="sm" onClick={saveFields} disabled={saving}>{saving ? "…" : "Enregistrer"}</Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditingFields(false)}>Annuler</Button>
+          </div>
+        </td>
+      </tr>
+    )}
+    </>
   );
 }

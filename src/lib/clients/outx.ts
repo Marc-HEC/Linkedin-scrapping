@@ -108,22 +108,67 @@ export async function searchProfiles(
   apiKey: string,
   baseUrl: string
 ): Promise<LinkedinProfileResult[]> {
-  const url = `${norm(baseUrl)}/linkedin/search`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: headers(apiKey),
-    body: JSON.stringify({
-      keywords: params.keywords,
-      title: params.title,
-      company: params.company,
-      location: params.location,
-      limit: params.limit ?? 25,
-    }),
+  const body = JSON.stringify({
+    keywords: params.keywords,
+    title: params.title,
+    company: params.company,
+    location: params.location,
+    limit: params.limit ?? 25,
   });
-  if (!res.ok) throw new Error(`OutX search ${res.status}: ${await res.text()}`);
-  const json = (await res.json()) as { results?: RawProfile[] } | RawProfile[];
-  const rows = Array.isArray(json) ? json : (json.results ?? []);
-  return rows.map(normalizeProfile).filter((p) => !!p.linkedin_url);
+
+  const postUrl = `${norm(baseUrl)}/linkedin-agent/search-profiles`;
+  console.log(`[OutX] POST ${postUrl} keywords=${params.keywords}`);
+  const res = await fetch(postUrl, { method: "POST", headers: headers(apiKey), body });
+  const text = await res.text();
+  console.log(`[OutX] response status=${res.status} body=${text}`);
+  if (!res.ok) throw new Error(`OutX search-profiles ${res.status}: ${text}`);
+
+  const json = JSON.parse(text) as
+    | { api_agent_task_id: string; success: boolean }
+    | { results?: RawProfile[] }
+    | RawProfile[];
+
+  // Réponse synchrone (certains plans retournent les profils directement)
+  if (Array.isArray(json)) return json.map(normalizeProfile).filter((p) => !!p.linkedin_url);
+  if ("results" in json && json.results) return json.results.map(normalizeProfile).filter((p) => !!p.linkedin_url);
+
+  // Réponse asynchrone : OutX a créé une tâche en background, on poll le résultat
+  if (!("api_agent_task_id" in json) || !json.api_agent_task_id) {
+    throw new Error(`OutX search: réponse inattendue — ${text}`);
+  }
+  const taskId = json.api_agent_task_id;
+  const pollUrl = `${norm(baseUrl)}/linkedin-agent/get-task-status?api_agent_task_id=${encodeURIComponent(taskId)}`;
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await sleep(2000);
+    console.log(`[OutX] GET ${pollUrl} attempt=${attempt + 1}`);
+    const pollRes = await fetch(pollUrl, { headers: { "x-api-key": apiKey } });
+    const pollText = await pollRes.text();
+    console.log(`[OutX] poll status=${pollRes.status} body=${pollText}`);
+    if (!pollRes.ok) continue;
+
+    const data = JSON.parse(pollText) as {
+      status: string;
+      task_output?: {
+        profiles?: RawProfile[];
+        results?: RawProfile[];
+        people?: RawProfile[];
+      };
+    };
+
+    if (data.status === "completed") {
+      const rows =
+        data.task_output?.profiles ??
+        data.task_output?.results ??
+        data.task_output?.people ??
+        [];
+      return rows.map(normalizeProfile).filter((p) => !!p.linkedin_url);
+    }
+    if (data.status === "failed") {
+      throw new Error(`OutX search task failed`);
+    }
+  }
+  throw new Error("OutX search timed out (15 tentatives × 2s)");
 }
 
 // ---- helpers ----

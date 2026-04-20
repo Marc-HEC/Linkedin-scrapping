@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getLinkedinSenderForUser } from "@/lib/senders/linkedin";
+import type { UnipileCreds } from "@/lib/senders/linkedin";
 import { searchPeople as apolloSearchPeople } from "@/lib/clients/apollo";
 import { enrichBatch as dropcontactEnrichBatch } from "@/lib/enrichment/dropcontact";
 import { getDecryptedCredential } from "../integrations/actions";
@@ -66,6 +67,25 @@ export async function updateContactTagsAction(contactId: string, tags: string[])
     .update({ tags: cleaned })
     .eq("id", contactId)
     .eq("user_id", userId);
+  if (error) return { error: error.message };
+  revalidatePath("/contacts");
+  return { ok: true };
+}
+
+export async function updateContactAction(
+  id: string,
+  data: {
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+    linkedin_url?: string | null;
+    company_name?: string | null;
+    role?: string | null;
+  }
+) {
+  const userId = await getUserId();
+  const admin = createSupabaseAdmin();
+  const { error } = await admin.from("contacts").update(data).eq("id", id).eq("user_id", userId);
   if (error) return { error: error.message };
   revalidatePath("/contacts");
   return { ok: true };
@@ -237,6 +257,66 @@ export async function searchAndImportLinkedinContactsAction(fd: FormData) {
 }
 
 // ============================================================
+// Recherche + import LinkedIn via Unipile
+// ============================================================
+export async function searchAndImportWithUnipileAction(fd: FormData) {
+  const userId = await getUserId();
+  const parsed = searchSchema.safeParse(Object.fromEntries(fd));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const creds = await getDecryptedCredential<UnipileCreds>(userId, "unipile");
+  if (!creds?.api_key || !creds.dsn || !creds.account_id) {
+    return { error: "Unipile non configuré (Intégrations → Unipile). Champs requis : api_key, dsn, account_id." };
+  }
+
+  const { searchProfiles } = await import("@/lib/clients/unipile");
+  let profiles;
+  try {
+    profiles = await searchProfiles(parsed.data, creds.api_key, creds.dsn, creds.account_id);
+  } catch (e) {
+    return { error: `Unipile search : ${(e as Error).message}` };
+  }
+
+  const urls = profiles.map((p) => p.linkedin_url).filter(Boolean);
+  if (urls.length === 0) return { ok: true, imported: 0, skipped: 0 };
+
+  const admin = createSupabaseAdmin();
+  const { data: existing } = await admin
+    .from("contacts")
+    .select("linkedin_url")
+    .eq("user_id", userId)
+    .in("linkedin_url", urls);
+  const existingSet = new Set((existing ?? []).map((r) => r.linkedin_url));
+
+  const toInsert = profiles
+    .filter((p) => p.linkedin_url && !existingSet.has(p.linkedin_url))
+    .map((p) => {
+      const [first, ...rest] = (p.full_name || "").split(" ");
+      return {
+        user_id: userId,
+        first_name: first || null,
+        last_name: rest.join(" ") || null,
+        email: p.email || null,
+        linkedin_url: p.linkedin_url,
+        company_name: p.company || null,
+        role: p.title || p.headline || null,
+        source: "linkedin_search_unipile",
+      };
+    });
+
+  if (toInsert.length === 0) {
+    revalidatePath("/contacts");
+    return { ok: true, imported: 0, skipped: profiles.length };
+  }
+
+  const { error } = await admin.from("contacts").insert(toInsert);
+  if (error) return { error: error.message };
+
+  revalidatePath("/contacts");
+  return { ok: true, imported: toInsert.length, skipped: profiles.length - toInsert.length };
+}
+
+// ============================================================
 // Recherche + import Apollo
 // ============================================================
 export async function apolloSearchAndImportContactsAction(fd: FormData) {
@@ -366,7 +446,8 @@ export async function getContactsProvidersStatusAction() {
   const providers = new Set((data ?? []).map((r) => r.provider));
   return {
     linkedin: providers.has("outx") || providers.has("unipile"),
-    linkedinSearch: providers.has("outx"), // seul OutX expose searchProfiles
+    linkedinSearch: providers.has("outx") || providers.has("unipile"),
+    unipileSearch: providers.has("unipile"),
     apollo: providers.has("apollo"),
     dropcontact: providers.has("dropcontact"),
   };
